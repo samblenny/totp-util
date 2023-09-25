@@ -1,10 +1,10 @@
 .PHONY: run test clean
 
-totp-util:
-	go build -buildvcs=false -ldflags "-s -w" -trimpath
+totp-util: go.mod main.go
+	@go build -buildvcs=false -ldflags "-s -w" -trimpath
 
 run: totp-util
-	./totp-util
+	@./totp-util
 
 test:
 	go test
