@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/url" // For QueryUnescape
 	"os"
 	"regexp"
+	"strings"
 )
 
 // === Types ===
@@ -32,8 +34,8 @@ const VERSION string = "0.1.1"
 var quitRequested = false
 var mainMenu Menu = Menu{
 	{"?             ", "Show menu"},
-	{"otpauth://... ", "Parse TOTP QR Code URI into tmp profile"},
 	{"pr            ", "Print all profiles"},
+	{"otpauth://... ", "Parse TOTP QR Code URI into tmp profile"},
 	{"ed            ", "Edit tmp profile"},
 	{"get <profile> ", "Get profile into tmp for <profile> in range 0 to 9"},
 	{"set <profile> ", "Set profile from tmp for <profile> in range 0 to 9"},
@@ -129,6 +131,69 @@ func printProfiles() {
 	printTmp()
 }
 
+func parseURI(line string) {
+	tmpProfile = Profile{line, "", ""}
+	var issuer1, label, secret, issuer2, algorithm, digits, period string
+	// Remove prefix and split URI into path and query, separated by "?"
+	totpQRCodeRE := regexp.MustCompile(`^otpauth://totp/(.*)\?(.*)`)
+	submatches := totpQRCodeRE.FindStringSubmatch(line)
+	path := submatches[1]
+	// Split query into key=value pairs separated by "&"
+	query := strings.Split(submatches[2], "&")
+	// Split path into ((issuer):)(label=user@domain)
+	pathRE := regexp.MustCompile(`(([^:]*):)(.*)`)
+	pathSubmatches := pathRE.FindStringSubmatch(path)
+	issuer1 = pathSubmatches[2]
+	if unesc, err := url.QueryUnescape(issuer1); err == nil {
+		issuer1 = unesc
+	}
+	label = pathSubmatches[3]
+	// Extract query parameter values (secret=, ...)
+	for _, v := range query {
+		switch {
+		case strings.HasPrefix(v, "secret="):
+			secret = v[len("secret="):]
+		case strings.HasPrefix(v, "issuer="):
+			issuer2 = v[len("issuer="):]
+			if unesc, err := url.QueryUnescape(issuer2); err == nil {
+				issuer2 = unesc
+			}
+		case strings.HasPrefix(v, "algorithm="):
+			algorithm = strings.ToUpper(v[len("algorithm="):])
+		case strings.HasPrefix(v, "digits="):
+			digits = v[len("digits="):]
+		case strings.HasPrefix(v, "period="):
+			period = v[len("period="):]
+		}
+	}
+	fmt.Printf("   issuer1: %v\n", issuer1)
+	fmt.Printf("     label: %v\n", label)
+	fmt.Printf("    secret: %v\n", secret)
+	fmt.Printf("    issuer: %v\n", issuer2)
+	fmt.Printf(" algorithm: %v\n", algorithm)
+	fmt.Printf("    digits: %v\n", digits)
+	fmt.Printf("    period: %v\n", period)
+	var ok = true
+	// Google Authenticator expects 6 digits, SHA1, and 30s period, so for
+	// URI's that specify something different, flag them for manual review
+	if algorithm != "" && algorithm != "SHA1" {
+		fmt.Println("WARNING: Unsupported algorithm (not blank, not SHA1)")
+		ok = false
+	}
+	if period != "" && period != "30" {
+		fmt.Println("WARNING: Unsupported period (not blank, not 30)")
+		ok = false
+	}
+	if digits != "" && digits != "6" {
+		fmt.Println("WARNING: Unsupported digits (not blank, not 6)")
+		ok = false
+	}
+	if ok {
+		tmpProfile.Title = issuer2
+		tmpProfile.Secret = secret
+	}
+}
+
 func editTmp() {
 	fmt.Println("[edit tmp]") // TODO
 }
@@ -190,12 +255,12 @@ func readEvalPrint() {
 	switch {
 	case line == "?":
 		showMenu()
-	case goodUriRE.MatchString(line):
-		fmt.Println("<<good URI>>")
-	case otherUriRE.MatchString(line):
-		fmt.Println("URI format not recognized. Try 'ed' to enter manually?")
 	case line == "pr":
 		printProfiles()
+	case goodUriRE.MatchString(line):
+		parseURI(line)
+	case otherUriRE.MatchString(line):
+		fmt.Println("URI format not recognized. Try 'ed' to enter manually?")
 	case line == "ed":
 		editTmp()
 	case getRE.MatchString(line):
