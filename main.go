@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
-	"strings"
+	"os"
+	"regexp"
 )
 
 // === Types ===
@@ -14,25 +17,45 @@ type Item struct {
 
 type Menu []Item
 
+type Profile struct {
+	URI    string
+	Title  string
+	Secret string
+}
+
+type Database [10]Profile
+
 // === Global Data ===
 
-const VERSION string = "0.1.0"
+const VERSION string = "0.1.1"
 
 var quitRequested = false
-var unwrittenChanges = false
-var dbIsOpen = false
-var havePassphrase = false
 var mainMenu Menu = Menu{
-	{"?", "Show menu"},
-	{"o", "Open database from ./totp-db.pem"},
-	{"c", "Create new database in RAM"},
-	{"p", "Print records"},
-	{"a", "Append new record"},
-	{"d", "Delete record"},
-	{"e", "Edit record"},
-	{"b", "Burn records to hardware token"},
-	{"w", "Write database to ./totp-db.pem"},
-	{"q", "Quit"},
+	{"?             ", "Show menu"},
+	{"otpauth://... ", "Parse TOTP QR Code URI into tmp profile"},
+	{"pr            ", "Print all profiles"},
+	{"ed            ", "Edit tmp profile"},
+	{"get <profile> ", "Get profile into tmp for <profile> in range 0 to 9"},
+	{"set <profile> ", "Set profile from tmp for <profile> in range 0 to 9"},
+	{"burn <profile>", "Burn profile to token for <profile> in range 0 to 9"},
+	{"q!            ", "Quit without saving changes"},
+}
+var profiles = Database{
+	{"", "", ""}, // 0
+	{"", "", ""}, // 1
+	{"", "", ""}, // 2
+	{"", "", ""}, // 3
+	{"", "", ""}, // 4
+	{"", "", ""}, // 5
+	{"", "", ""}, // 6
+	{"", "", ""}, // 7
+	{"", "", ""}, // 8
+	{"", "", ""}, // 9
+}
+var tmpProfile = Profile{
+	"otpauth://totp/Example:alice@google.com?secret=JBSWY3DPEHPK3PXP&issuer=Example",
+	"Example",
+	"JBSWY3DPEHPK3PXP",
 }
 
 // === Message Printers ===
@@ -43,23 +66,30 @@ func showMenu() {
 	}
 }
 
-func warnDbNotOpen() {
-	fmt.Println("Database is not ready. Try 'o' (open) or 'c' (create).")
+func warnProfileRange(err error) {
+	fmt.Println("Profile should be in range of 0 to 9.", err)
 }
 
-func warnDbOpen() {
-	if unwrittenChanges {
-		fmt.Println("Database is already in RAM. To discard changes, try 'q'.")
-	} else {
-		fmt.Println("Database is already in RAM.")
-	}
+func warnMissingProfileArg() {
+	fmt.Println("You didn't specify which profile to use. For help, try '?'.")
 }
 
 // === Input Scanners ===
 
+var scanner *bufio.Scanner = bufio.NewScanner(os.Stdin)
+
 func scan(prompt string) (result string) {
 	fmt.Printf("%v", prompt)
-	fmt.Scanf("%s", &result)
+	scanner.Scan()
+	result = scanner.Text()
+	return
+}
+
+func scanIndex(str string) (index int, err error) {
+	_, err = fmt.Sscanf(str, "%d", &index)
+	if err == nil && (index < 0 || 9 < index) {
+		err = errors.New("Profile index out of range")
+	}
 	return
 }
 
@@ -75,138 +105,123 @@ func scanPassphrase(confirm bool) (password string) {
 // === Menu Action Handlers ===
 
 func openAndDecryptDbFile() {
-	if dbIsOpen && unwrittenChanges {
-		warnDbOpen()
-	} else {
-		_ = scanPassphrase(false)
-		havePassphrase = true
-		fmt.Println("[open database file ./totp-db.pem]") // TODO
-		dbIsOpen = true
+	_ = scanPassphrase(false)
+	fmt.Println("[open database file ./totp-db.pem]") // TODO
+}
+
+func printProfile(index int) {
+	p := profiles[index]
+	fmt.Printf("[%d]    URI: %v\n", index, p.URI)
+	fmt.Printf("     title: %v\n", p.Title)
+	fmt.Printf("    secret: %v\n", p.Secret)
+}
+
+func printTmp() {
+	fmt.Printf("tmp    URI: %v\n", tmpProfile.URI)
+	fmt.Printf("     title: %v\n", tmpProfile.Title)
+	fmt.Printf("    secret: %v\n", tmpProfile.Secret)
+}
+
+func printProfiles() {
+	for i := range profiles {
+		printProfile(i)
+	}
+	printTmp()
+}
+
+func editTmp() {
+	fmt.Println("[edit tmp]") // TODO
+}
+
+func getProfile(index int) {
+	printProfile(index)
+	printTmp()
+	msg := fmt.Sprintf("Replace tmp with [%d]? Are you sure? [y/N]: ", index)
+	switch scan(msg) {
+	case "y", "Y":
+		tmpProfile = profiles[index]
+		fmt.Printf("[get: copied profile %d to tmp]\n", index)
+	default:
+		fmt.Println("[get canceled]")
 	}
 }
 
-// createRamDb initializes a new (or temporary) database in RAM.
-// This is meant to support two use cases:
-//  1. Create a new database that you intend to write to a file later using
-//     totp-util's encryption facilities
-//  2. Create a temporary database, ramdisk style, that you intend to use for
-//     burning secrets to a hardware token without saving to disk (perhaps you
-//     prefer to keep TOTP secrets in a separate password manager)
-func createRamDb() {
-	if dbIsOpen {
-		warnDbOpen()
-		return
+func setProfile(index int) {
+	printProfile(index)
+	printTmp()
+	msg := fmt.Sprintf("Replace [%d] with tmp? Are you sure? [y/N]: ", index)
+	switch scan(msg) {
+	case "y", "Y":
+		profiles[index] = tmpProfile
+		fmt.Printf("[set profile %d to values from tmp]\n", index)
+	default:
+		fmt.Println("[set canceled]")
 	}
-	dbIsOpen = true
-	fmt.Println("[create new database in RAM]") // TODO
 }
 
-func printRecord() {
-	if !dbIsOpen {
-		warnDbNotOpen()
-		return
+func burnProfile(index int) {
+	printProfile(index)
+	msg := fmt.Sprintf("Burn [%d] to token? Are you sure? [y/N]: ", index)
+	switch scan(msg) {
+	case "y", "Y":
+		fmt.Printf("[burn to hardware token profile %d]\n", index)
+		fmt.Println("[TODO: burn burn burn]") // TODO
+	default:
+		fmt.Println("[burn canceled]")
 	}
-	fmt.Println("[print records]") // TODO
-}
-
-func appendRecord() {
-	if !dbIsOpen {
-		warnDbNotOpen()
-		return
-	}
-	unwrittenChanges = true
-	fmt.Println("[append record form]") // TODO
-}
-
-func deleteRecord() {
-	if !dbIsOpen {
-		warnDbNotOpen()
-		return
-	}
-	unwrittenChanges = true
-	fmt.Println("[delete record]") // TODO
-}
-
-func editRecord() {
-	if !dbIsOpen {
-		warnDbNotOpen()
-		return
-	}
-	unwrittenChanges = true
-	fmt.Println("[edit record]") // TODO
-}
-
-func burnRecordsToToken() {
-	if !dbIsOpen {
-		warnDbNotOpen()
-		return
-	}
-	fmt.Println("[burn to hardware token]") // TODO
-}
-
-func writeEncryptedRecordsToDb() {
-	if !dbIsOpen {
-		warnDbNotOpen()
-		return
-	}
-	if !havePassphrase {
-		_ = scanPassphrase(true)
-	} else {
-		fmt.Println("[prompt: reuse cached passphrase?]") // TODO
-	}
-	fmt.Println("[encrypting db]")                   // TODO
-	fmt.Println("[write database to ./totp-db.pem]") // TODO
-	unwrittenChanges = false
 }
 
 func quit() {
-	prompt1 := "You have unwritten database changes. Quit anyway? [y/N]: "
-	prompt2 := "Last chance... You will lose data. Are you sure? [y/N]: "
-	prompt3 := "To save your changes, try 'w'."
-	if unwrittenChanges {
-		switch strings.ToLower(scan(prompt1)) {
-		case "y":
-			switch strings.ToLower(scan(prompt2)) {
-			case "y":
-				quitRequested = true
-			default:
-				fmt.Println(prompt3)
-			}
-		default:
-			fmt.Println(prompt3)
-		}
-	} else {
-		quitRequested = true
-	}
+	quitRequested = true
 }
 
 // === Control Logic ===
 
+var getRE *regexp.Regexp = regexp.MustCompile(`^get [0-9]`)
+var setRE *regexp.Regexp = regexp.MustCompile(`^set [0-9]`)
+var burnRE *regexp.Regexp = regexp.MustCompile(`^burn [0-9]`)
+var missingRE *regexp.Regexp = regexp.MustCompile(`^(burn|set|cp)( .*$|$)`)
+var goodUriRE *regexp.Regexp = regexp.MustCompile(`^otpauth://totp/`)
+var otherUriRE *regexp.Regexp = regexp.MustCompile(`^otpauth://`)
+
 func readEvalPrint() {
 	prompt := "> "
-	if unwrittenChanges {
-		prompt = "*> "
-	}
-	switch strings.ToLower(scan(prompt)) {
-	case "?", "h", "help", "m", "menu":
+	line := scan(prompt)
+	switch {
+	case line == "?":
 		showMenu()
-	case "o":
-		openAndDecryptDbFile()
-	case "c":
-		createRamDb()
-	case "p":
-		printRecord()
-	case "a":
-		appendRecord()
-	case "d":
-		deleteRecord()
-	case "e":
-		editRecord()
-	case "b":
-		burnRecordsToToken()
-	case "w":
-		writeEncryptedRecordsToDb()
-	case "q":
+	case goodUriRE.MatchString(line):
+		fmt.Println("<<good URI>>")
+	case otherUriRE.MatchString(line):
+		fmt.Println("URI format not recognized. Try 'ed' to enter manually?")
+	case line == "pr":
+		printProfiles()
+	case line == "ed":
+		editTmp()
+	case getRE.MatchString(line):
+		index, err := scanIndex(line[4:]) // len("get ") == 4
+		if err != nil {
+			warnProfileRange(err)
+		} else {
+			getProfile(index)
+		}
+	case setRE.MatchString(line):
+		index, err := scanIndex(line[4:]) // len("set ") == 4
+		if err != nil {
+			warnProfileRange(err)
+		} else {
+			setProfile(index)
+		}
+	case burnRE.MatchString(line):
+		index, err := scanIndex(line[5:]) // len("burn ") == 5
+		if err != nil {
+			warnProfileRange(err)
+		} else {
+			burnProfile(index)
+		}
+	case missingRE.MatchString(line):
+		warnMissingProfileArg()
+	case line == "q!":
 		quit()
 	default:
 		fmt.Println("Unrecognized input. Try '?' to show menu.")
@@ -214,6 +229,7 @@ func readEvalPrint() {
 }
 
 func main() {
+	fmt.Println("CAUTION: Saving profiles to disk is not yet implemented!")
 	fmt.Printf("totp-util v%v\n", VERSION)
 	showMenu()
 	for !quitRequested {
