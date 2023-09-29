@@ -5,6 +5,11 @@ TOTP hardware token setup utility
 
 ## Usage
 
-TLDR: `make run`
+To run `totp_util`, do `make run`
 
 For more detail, check out the build targets in [Makefile](Makefile)
+
+
+## Tests
+
+To run the tests, do `make test` or `go test`.

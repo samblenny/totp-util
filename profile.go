@@ -47,10 +47,10 @@ func NewProfileFromURI(uri string) (p Profile) {
 	p.URI = uri
 	var issuer1, issuer2 string
 	// Remove prefix and split URI into path and query, separated by "?"
-	totpQRCodeRE := regexp.MustCompile(`^otpauth://totp/(.*)\?(.*)`)
+	totpQRCodeRE := regexp.MustCompile(`^otpauth://totp/([^?]*)\?(.*)`)
 	submatches := totpQRCodeRE.FindStringSubmatch(uri)
 	if len(submatches) < 3 {
-		// Badly formed URI
+		// URI does not match the form of otpauth://totop/<label>?<query>
 		return
 	}
 	path := submatches[1]
@@ -59,17 +59,11 @@ func NewProfileFromURI(uri string) (p Profile) {
 	// Split path into ((issuer)(?:$3A|:)(?:%20)*)(account=user@domain)
 	pathRE := regexp.MustCompile(`((.*)(?:%3A|:)(?:%20)*)?(.*)`)
 	pathSubmatches := pathRE.FindStringSubmatch(path)
-	if len(pathSubmatches) == 4 {
-		// Label is in <issuer>:<account> format
-		issuer1 = pathSubmatches[2]
-		if unesc, err := url.QueryUnescape(issuer1); err == nil {
-			issuer1 = unesc
-		}
-		p.Account = pathSubmatches[3]
-	} else if len(pathSubmatches) == 2 {
-		// Label is just an <account> with no issuer prefix
-		p.Account = pathSubmatches[1]
+	issuer1 = pathSubmatches[2]
+	if unesc, err := url.QueryUnescape(issuer1); err == nil {
+		issuer1 = unesc
 	}
+	p.Account = pathSubmatches[3]
 	// Extract query parameter values (secret=, ...)
 	for _, v := range query {
 		switch {
