@@ -1,6 +1,7 @@
 .PHONY: run test clean
+SRC_FILES=go.mod main.go profile.go doc.go
 
-totp-util: go.mod main.go
+totp-util: Makefile $(SRC_FILES)
 	@go build -buildvcs=false -ldflags "-s -w" -trimpath
 
 run: totp-util

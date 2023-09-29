@@ -2,13 +2,10 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url" // For QueryUnescape
 	"os"
 	"regexp"
-	"strings"
 )
 
 // === Types ===
@@ -20,22 +17,11 @@ type Item struct {
 
 type Menu []Item
 
-type Profile struct {
-	URI       string `json:"URI,omitempty"`
-	Title     string `json:"title,omitempty"`
-	Issuer    string `json:"issuer,omitempty"`
-	Account   string `json:"account,omitempty"`
-	Secret    string `json:"secret,omitempty"`
-	Algorithm string `json:"algorithm,omitempty"`
-	Digits    string `json:"digits,omitempty"`
-	Period    string `json:"period,omitempty"`
-}
-
 type Database [10]Profile
 
 // === Global Data ===
 
-const VERSION string = "0.1.3"
+const VERSION string = "0.2.0"
 
 var quitRequested = false
 var backRequested = false
@@ -105,17 +91,8 @@ func scanIndex(str string) (index int, err error) {
 
 // === Menu Action Handlers ===
 
-func toJson(p Profile) string {
-	bytes, err := json.MarshalIndent(p, "    ", " ")
-	if err != nil {
-		// This shouldn't happen
-		return "{\"error\":\"something went wrong\"}"
-	}
-	return string(bytes)
-}
-
 func printProfile(tag string, p Profile) {
-	fmt.Printf("%v %v\n", tag, strings.TrimLeft(toJson(p), ""))
+	fmt.Printf("%v %v\n", tag, p)
 }
 
 func printProfileAt(index int) {
@@ -136,79 +113,8 @@ func printProfiles() {
 }
 
 func parseURI(line string) {
-	tmpProfile = Profile{}
-	tmpProfile.URI = line
-	var issuer1, account, secret, issuer2, algorithm, digits, period string
-	// Remove prefix and split URI into path and query, separated by "?"
-	totpQRCodeRE := regexp.MustCompile(`^otpauth://totp/(.*)\?(.*)`)
-	submatches := totpQRCodeRE.FindStringSubmatch(line)
-	path := submatches[1]
-	// Split query into key=value pairs separated by "&"
-	query := strings.Split(submatches[2], "&")
-	// Split path into ((issuer)(?:$3A|:)(?:%20)*)(account=user@domain)
-	pathRE := regexp.MustCompile(`(([^:]*):)(.*)`)
-	pathSubmatches := pathRE.FindStringSubmatch(path)
-	issuer1 = pathSubmatches[2]
-	if unesc, err := url.QueryUnescape(issuer1); err == nil {
-		issuer1 = unesc
-	}
-	account = pathSubmatches[3]
-	// Extract query parameter values (secret=, ...)
-	for _, v := range query {
-		switch {
-		case strings.HasPrefix(v, "secret="):
-			secret = v[len("secret="):]
-		case strings.HasPrefix(v, "issuer="):
-			issuer2 = v[len("issuer="):]
-			if unesc, err := url.QueryUnescape(issuer2); err == nil {
-				issuer2 = unesc
-			}
-		case strings.HasPrefix(v, "algorithm="):
-			algorithm = strings.ToUpper(v[len("algorithm="):])
-		case strings.HasPrefix(v, "digits="):
-			digits = v[len("digits="):]
-		case strings.HasPrefix(v, "period="):
-			period = v[len("period="):]
-		}
-	}
-	var ok = true
-	// Google Authenticator expects 6 digits, SHA1, and 30s period, so for
-	// URI's that specify something different, flag them for manual review
-	if algorithm != "" && algorithm != "SHA1" {
-		fmt.Println("WARNING: Unsupported algorithm (not blank, not SHA1)")
-		ok = false
-	}
-	if period != "" && period != "30" {
-		fmt.Println("WARNING: Unsupported period (not blank, not 30)")
-		ok = false
-	}
-	if digits != "" && digits != "6" {
-		fmt.Println("WARNING: Unsupported digits (not blank, not 6)")
-		ok = false
-	}
-	if issuer1 != "" && issuer2 != "" && issuer1 != issuer2 {
-		fmt.Println("WARNING: issuer prefix does not match issuer parameter")
-	}
-	if ok {
-		// According to this wiki in the archived google-authenticator repo,
-		//  https://github.com/google/google-authenticator/wiki/Key-Uri-Format
-		// the recommended QR Code TOTP enrollment URI structure includes an
-		// an issuer query parameter and a matching issue prefix in the label
-		// that comes after `...//totp/`. But, sometimes it might be the case
-		// that there's only a prefix in the label. Newer method is to use the
-		// parameter but provide the label prefix for backward compatibility.
-		if issuer2 != "" {
-			tmpProfile.Issuer = issuer2
-		} else {
-			tmpProfile.Issuer = issuer1
-		}
-		tmpProfile.Secret = secret
-		tmpProfile.Account = account
-		tmpProfile.Algorithm = algorithm
-		tmpProfile.Digits = digits
-		tmpProfile.Period = period
-		fmt.Printf("tmp %v\n", toJson(tmpProfile))
-	}
+	tmpProfile = NewProfileFromURI(line)
+	fmt.Printf("tmp %v\n", tmpProfile)
 }
 
 func fetchProfile(index int) {
