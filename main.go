@@ -14,7 +14,7 @@ import (
 // === Types ===
 
 type Item struct {
-	Shortcut    string
+	Syntax      string
 	Description string
 }
 
@@ -35,7 +35,7 @@ type Database [10]Profile
 
 // === Global Data ===
 
-const VERSION string = "0.1.2"
+const VERSION string = "0.1.3"
 
 var quitRequested = false
 var backRequested = false
@@ -72,7 +72,7 @@ var tmpProfile = Profile{}
 
 func showMenu(m Menu) {
 	for _, item := range m {
-		fmt.Printf(" %v - %v\n", item.Shortcut, item.Description)
+		fmt.Printf(" %v - %v\n", item.Syntax, item.Description)
 	}
 }
 
