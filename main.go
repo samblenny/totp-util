@@ -44,7 +44,7 @@ var mainMenu Menu = Menu{
 	{"pr           ", "Print all profiles"},
 	{"otpauth://...", "Parse TOTP QR Code URI into tmp profile"},
 	{"ed           ", "Edit tmp profile"},
-	{"fetch <n>    ", "Fetch profile <n> into tmp for <n> in ranbe 0 to 9"},
+	{"fetch <n>    ", "Fetch profile <n> into tmp for <n> in range 0 to 9"},
 	{"store <n>    ", "Store tmp as profile <n> for <n> in range 0 to 9"},
 	{"burn <n>     ", "Burn profile <n> to token for <n> in range 0 to 9"},
 	{"q!           ", "Quit without saving changes"},
