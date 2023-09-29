@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url" // For QueryUnescape
@@ -20,45 +21,35 @@ type Item struct {
 type Menu []Item
 
 type Profile struct {
-	URI    string
-	Title  string
-	Secret string
+	URI       string `json:"URI,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Issuer    string `json:"issuer,omitempty"`
+	Account   string `json:"account,omitempty"`
+	Secret    string `json:"secret,omitempty"`
+	Algorithm string `json:"algorithm,omitempty"`
+	Digits    string `json:"digits,omitempty"`
+	Period    string `json:"period,omitempty"`
 }
 
 type Database [10]Profile
 
 // === Global Data ===
 
-const VERSION string = "0.1.1"
+const VERSION string = "0.1.2"
 
 var quitRequested = false
 var mainMenu Menu = Menu{
-	{"?             ", "Show menu"},
-	{"pr            ", "Print all profiles"},
-	{"otpauth://... ", "Parse TOTP QR Code URI into tmp profile"},
-	{"ed            ", "Edit tmp profile"},
-	{"get <profile> ", "Get profile into tmp for <profile> in range 0 to 9"},
-	{"set <profile> ", "Set profile from tmp for <profile> in range 0 to 9"},
-	{"burn <profile>", "Burn profile to token for <profile> in range 0 to 9"},
-	{"q!            ", "Quit without saving changes"},
+	{"?            ", "Show menu"},
+	{"pr           ", "Print all profiles"},
+	{"otpauth://...", "Parse TOTP QR Code URI into tmp profile"},
+	{"ed           ", "Edit tmp profile"},
+	{"fetch <n>    ", "Fetch profile <n> into tmp for <n> in ranbe 0 to 9"},
+	{"store <n>    ", "Stor tmp as profile <n> for <n> in range 0 to 9"},
+	{"burn <n>     ", "Burn profile <n> to token for <n> in range 0 to 9"},
+	{"q!           ", "Quit without saving changes"},
 }
-var profiles = Database{
-	{"", "", ""}, // 0
-	{"", "", ""}, // 1
-	{"", "", ""}, // 2
-	{"", "", ""}, // 3
-	{"", "", ""}, // 4
-	{"", "", ""}, // 5
-	{"", "", ""}, // 6
-	{"", "", ""}, // 7
-	{"", "", ""}, // 8
-	{"", "", ""}, // 9
-}
-var tmpProfile = Profile{
-	"otpauth://totp/Example:alice@google.com?secret=JBSWY3DPEHPK3PXP&issuer=Example",
-	"Example",
-	"JBSWY3DPEHPK3PXP",
-}
+var profiles = Database{}
+var tmpProfile = Profile{}
 
 // === Message Printers ===
 
@@ -95,59 +86,56 @@ func scanIndex(str string) (index int, err error) {
 	return
 }
 
-func scanPassphrase(confirm bool) (password string) {
-	fmt.Println("[prompt for passphrase]")
-	if confirm {
-		fmt.Println("[prompt to confirm passphrase]")
-	}
-	password = ""
-	return
-}
-
 // === Menu Action Handlers ===
 
-func openAndDecryptDbFile() {
-	_ = scanPassphrase(false)
-	fmt.Println("[open database file ./totp-db.pem]") // TODO
+func toJson(p Profile) string {
+	bytes, err := json.MarshalIndent(p, "    ", " ")
+	if err != nil {
+		// This shouldn't happen
+		return "{\"error\":\"something went wrong\"}"
+	}
+	return string(bytes)
 }
 
-func printProfile(index int) {
+func printProfile(tag string, p Profile) {
+	fmt.Printf("%v %v\n", tag, strings.TrimLeft(toJson(p), ""))
+}
+
+func printProfileAt(index int) {
 	p := profiles[index]
-	fmt.Printf("[%d]    URI: %v\n", index, p.URI)
-	fmt.Printf("     title: %v\n", p.Title)
-	fmt.Printf("    secret: %v\n", p.Secret)
+	tag := fmt.Sprintf("[%d]", index)
+	printProfile(tag, p)
 }
 
 func printTmp() {
-	fmt.Printf("tmp    URI: %v\n", tmpProfile.URI)
-	fmt.Printf("     title: %v\n", tmpProfile.Title)
-	fmt.Printf("    secret: %v\n", tmpProfile.Secret)
+	printProfile("tmp", tmpProfile)
 }
 
 func printProfiles() {
 	for i := range profiles {
-		printProfile(i)
+		printProfileAt(i)
 	}
 	printTmp()
 }
 
 func parseURI(line string) {
-	tmpProfile = Profile{line, "", ""}
-	var issuer1, label, secret, issuer2, algorithm, digits, period string
+	tmpProfile = Profile{}
+	tmpProfile.URI = line
+	var issuer1, account, secret, issuer2, algorithm, digits, period string
 	// Remove prefix and split URI into path and query, separated by "?"
 	totpQRCodeRE := regexp.MustCompile(`^otpauth://totp/(.*)\?(.*)`)
 	submatches := totpQRCodeRE.FindStringSubmatch(line)
 	path := submatches[1]
 	// Split query into key=value pairs separated by "&"
 	query := strings.Split(submatches[2], "&")
-	// Split path into ((issuer):)(label=user@domain)
+	// Split path into ((issuer)(?:$3A|:)(?:%20)*)(account=user@domain)
 	pathRE := regexp.MustCompile(`(([^:]*):)(.*)`)
 	pathSubmatches := pathRE.FindStringSubmatch(path)
 	issuer1 = pathSubmatches[2]
 	if unesc, err := url.QueryUnescape(issuer1); err == nil {
 		issuer1 = unesc
 	}
-	label = pathSubmatches[3]
+	account = pathSubmatches[3]
 	// Extract query parameter values (secret=, ...)
 	for _, v := range query {
 		switch {
@@ -166,13 +154,6 @@ func parseURI(line string) {
 			period = v[len("period="):]
 		}
 	}
-	fmt.Printf("   issuer1: %v\n", issuer1)
-	fmt.Printf("     label: %v\n", label)
-	fmt.Printf("    secret: %v\n", secret)
-	fmt.Printf("    issuer: %v\n", issuer2)
-	fmt.Printf(" algorithm: %v\n", algorithm)
-	fmt.Printf("    digits: %v\n", digits)
-	fmt.Printf("    period: %v\n", period)
 	var ok = true
 	// Google Authenticator expects 6 digits, SHA1, and 30s period, so for
 	// URI's that specify something different, flag them for manual review
@@ -188,9 +169,28 @@ func parseURI(line string) {
 		fmt.Println("WARNING: Unsupported digits (not blank, not 6)")
 		ok = false
 	}
+	if issuer1 != "" && issuer2 != "" && issuer1 != issuer2 {
+		fmt.Println("WARNING: issuer prefix does not match issuer parameter")
+	}
 	if ok {
-		tmpProfile.Title = issuer2
+		// According to this wiki in the archived google-authenticator repo,
+		//  https://github.com/google/google-authenticator/wiki/Key-Uri-Format
+		// the recommended QR Code TOTP enrollment URI structure includes an
+		// an issuer query parameter and a matching issue prefix in the label
+		// that comes after `...//totp/`. But, sometimes it might be the case
+		// that there's only a prefix in the label. Newer method is to use the
+		// parameter but provide the label prefix for backward compatibility.
+		if issuer2 != "" {
+			tmpProfile.Issuer = issuer2
+		} else {
+			tmpProfile.Issuer = issuer1
+		}
 		tmpProfile.Secret = secret
+		tmpProfile.Account = account
+		tmpProfile.Algorithm = algorithm
+		tmpProfile.Digits = digits
+		tmpProfile.Period = period
+		fmt.Printf("tmp %v\n", toJson(tmpProfile))
 	}
 }
 
@@ -198,38 +198,38 @@ func editTmp() {
 	fmt.Println("[edit tmp]") // TODO
 }
 
-func getProfile(index int) {
-	printProfile(index)
-	printTmp()
+func fetchProfile(index int) {
+	printProfileAt(index)
 	msg := fmt.Sprintf("Replace tmp with [%d]? Are you sure? [y/N]: ", index)
 	switch scan(msg) {
 	case "y", "Y":
 		tmpProfile = profiles[index]
-		fmt.Printf("[get: copied profile %d to tmp]\n", index)
 	default:
-		fmt.Println("[get canceled]")
+		fmt.Println("[fetch canceled]")
 	}
 }
 
-func setProfile(index int) {
-	printProfile(index)
-	printTmp()
+func storeProfile(index int) {
+	printProfileAt(index)
 	msg := fmt.Sprintf("Replace [%d] with tmp? Are you sure? [y/N]: ", index)
 	switch scan(msg) {
 	case "y", "Y":
 		profiles[index] = tmpProfile
-		fmt.Printf("[set profile %d to values from tmp]\n", index)
+		// Clear the tmp profile after storing it in a database slot. This is
+		// mainly to the output of `pr` less redundant when discussing or
+		// documenting console logs during testing.
+		tmpProfile = Profile{}
+		printTmp()
 	default:
-		fmt.Println("[set canceled]")
+		fmt.Println("[store canceled]")
 	}
 }
 
 func burnProfile(index int) {
-	printProfile(index)
+	printProfileAt(index)
 	msg := fmt.Sprintf("Burn [%d] to token? Are you sure? [y/N]: ", index)
 	switch scan(msg) {
 	case "y", "Y":
-		fmt.Printf("[burn to hardware token profile %d]\n", index)
 		fmt.Println("[TODO: burn burn burn]") // TODO
 	default:
 		fmt.Println("[burn canceled]")
@@ -242,8 +242,8 @@ func quit() {
 
 // === Control Logic ===
 
-var getRE *regexp.Regexp = regexp.MustCompile(`^get [0-9]`)
-var setRE *regexp.Regexp = regexp.MustCompile(`^set [0-9]`)
+var fetchRE *regexp.Regexp = regexp.MustCompile(`^fetch [0-9]`)
+var storeRE *regexp.Regexp = regexp.MustCompile(`^store [0-9]`)
 var burnRE *regexp.Regexp = regexp.MustCompile(`^burn [0-9]`)
 var missingRE *regexp.Regexp = regexp.MustCompile(`^(burn|set|cp)( .*$|$)`)
 var goodUriRE *regexp.Regexp = regexp.MustCompile(`^otpauth://totp/`)
@@ -253,6 +253,8 @@ func readEvalPrint() {
 	prompt := "> "
 	line := scan(prompt)
 	switch {
+	case line == "":
+		// NOP
 	case line == "?":
 		showMenu()
 	case line == "pr":
@@ -263,22 +265,22 @@ func readEvalPrint() {
 		fmt.Println("URI format not recognized. Try 'ed' to enter manually?")
 	case line == "ed":
 		editTmp()
-	case getRE.MatchString(line):
-		index, err := scanIndex(line[4:]) // len("get ") == 4
+	case fetchRE.MatchString(line):
+		index, err := scanIndex(line[len("fetch "):])
 		if err != nil {
 			warnProfileRange(err)
 		} else {
-			getProfile(index)
+			fetchProfile(index)
 		}
-	case setRE.MatchString(line):
-		index, err := scanIndex(line[4:]) // len("set ") == 4
+	case storeRE.MatchString(line):
+		index, err := scanIndex(line[len("store "):])
 		if err != nil {
 			warnProfileRange(err)
 		} else {
-			setProfile(index)
+			storeProfile(index)
 		}
 	case burnRE.MatchString(line):
-		index, err := scanIndex(line[5:]) // len("burn ") == 5
+		index, err := scanIndex(line[len("burn "):])
 		if err != nil {
 			warnProfileRange(err)
 		} else {
