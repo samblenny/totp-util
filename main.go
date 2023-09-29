@@ -38,6 +38,7 @@ type Database [10]Profile
 const VERSION string = "0.1.2"
 
 var quitRequested = false
+var backRequested = false
 var mainMenu Menu = Menu{
 	{"?            ", "Show menu"},
 	{"pr           ", "Print all profiles"},
@@ -48,13 +49,29 @@ var mainMenu Menu = Menu{
 	{"burn <n>     ", "Burn profile <n> to token for <n> in range 0 to 9"},
 	{"q!           ", "Quit without saving changes"},
 }
+var editMenu Menu = Menu{
+	{"?            ", "Show menu"},
+	{"pr           ", "Print tmp profile"},
+	{"otpauth://...", "Parse TOTP QR Code URI into tmp profile"},
+	{"URI=<s>      ", "Set URI to <s> (should follow TOTP QR Code format)"},
+	{"title=<s>    ", "Set title to <s> (a short hardware token profile title)"},
+	{"issuer=<s>   ", "Set issuer to <s> (must not contain \":\" or \"%3A\")"},
+	{"account=<s>  ", "Set account to <s> (must not contain \":\" or \"%3A\")"},
+	{"secret=<s>   ", "Set secret to <s> (must be base32 string)"},
+	{"algorithm=<s>", "Set algorithm to <s> (can be empty, \"SHA1\" or \"SHA256\")"},
+	{"digits=<s>   ", "Set digits to <s> (can be empty, \"6\", or \"8\")"},
+	{"period=<s>   ", "Set period to <s> (can be empty, \"30\", or \"60\")"},
+	{"clr          ", "Clear tmp profile"},
+	{"b            ", "Go Back to main menu"},
+	{"q!           ", "Quit without saving changes"},
+}
 var profiles = Database{}
 var tmpProfile = Profile{}
 
 // === Message Printers ===
 
-func showMenu() {
-	for _, item := range mainMenu {
+func showMenu(m Menu) {
+	for _, item := range m {
 		fmt.Printf(" %v - %v\n", item.Shortcut, item.Description)
 	}
 }
@@ -194,10 +211,6 @@ func parseURI(line string) {
 	}
 }
 
-func editTmp() {
-	fmt.Println("[edit tmp]") // TODO
-}
-
 func fetchProfile(index int) {
 	printProfileAt(index)
 	msg := fmt.Sprintf("Replace tmp with [%d]? Are you sure? [y/N]: ", index)
@@ -236,11 +249,69 @@ func burnProfile(index int) {
 	}
 }
 
-func quit() {
-	quitRequested = true
+// === Control Logic ===
+
+func readEvalPrintEdit() {
+	prompt := "ed> "
+	line := scan(prompt)
+	keyValRE := regexp.MustCompile(
+		`^(URI|title|issuer|account|secret|algorithm|digits|period)=(.*)`)
+	matches := keyValRE.FindStringSubmatch(line)
+	n := len(matches)
+	key := ""
+	val := ""
+	if n == 2 || n == 3 {
+		key = matches[1]
+	}
+	if n == 3 { // Right-hand side of a key=value menu item can be blank
+		val = matches[2]
+	}
+	switch {
+	case line == "":
+		// NOP
+	case line == "?":
+		showMenu(editMenu)
+	case line == "pr":
+		printTmp()
+	case goodUriRE.MatchString(line):
+		parseURI(line)
+	case otherUriRE.MatchString(line):
+		fmt.Println("URI format not recognized. Try 'ed' to enter manually?")
+	case key == "URI":
+		tmpProfile.URI = val
+	case key == "title":
+		tmpProfile.Title = val
+	case key == "issuer":
+		tmpProfile.Issuer = val
+	case key == "account":
+		tmpProfile.Account = val
+	case key == "secret":
+		tmpProfile.Secret = val
+	case key == "algorithm":
+		tmpProfile.Algorithm = val
+	case key == "digits":
+		tmpProfile.Digits = val
+	case key == "period":
+		tmpProfile.Period = val
+	case line == "clr":
+		tmpProfile = Profile{}
+	case line == "b":
+		backRequested = true
+	case line == "q!":
+		quitRequested = true
+	default:
+		fmt.Println("Unrecognized input. Try '?' to show menu.")
+	}
 }
 
-// === Control Logic ===
+func editMenuLoop() {
+	backRequested = false
+	showMenu(editMenu)
+	for !quitRequested && !backRequested {
+		readEvalPrintEdit()
+	}
+	backRequested = false
+}
 
 var fetchRE *regexp.Regexp = regexp.MustCompile(`^fetch [0-9]`)
 var storeRE *regexp.Regexp = regexp.MustCompile(`^store [0-9]`)
@@ -249,14 +320,14 @@ var missingRE *regexp.Regexp = regexp.MustCompile(`^(burn|set|cp)( .*$|$)`)
 var goodUriRE *regexp.Regexp = regexp.MustCompile(`^otpauth://totp/`)
 var otherUriRE *regexp.Regexp = regexp.MustCompile(`^otpauth://`)
 
-func readEvalPrint() {
+func readEvalPrintMain() {
 	prompt := "> "
 	line := scan(prompt)
 	switch {
 	case line == "":
 		// NOP
 	case line == "?":
-		showMenu()
+		showMenu(mainMenu)
 	case line == "pr":
 		printProfiles()
 	case goodUriRE.MatchString(line):
@@ -264,7 +335,7 @@ func readEvalPrint() {
 	case otherUriRE.MatchString(line):
 		fmt.Println("URI format not recognized. Try 'ed' to enter manually?")
 	case line == "ed":
-		editTmp()
+		editMenuLoop()
 	case fetchRE.MatchString(line):
 		index, err := scanIndex(line[len("fetch "):])
 		if err != nil {
@@ -289,7 +360,7 @@ func readEvalPrint() {
 	case missingRE.MatchString(line):
 		warnMissingProfileArg()
 	case line == "q!":
-		quit()
+		quitRequested = true
 	default:
 		fmt.Println("Unrecognized input. Try '?' to show menu.")
 	}
@@ -298,9 +369,9 @@ func readEvalPrint() {
 func main() {
 	fmt.Println("CAUTION: Saving profiles to disk is not yet implemented!")
 	fmt.Printf("totp-util v%v\n", VERSION)
-	showMenu()
+	showMenu(mainMenu)
 	for !quitRequested {
-		readEvalPrint()
+		readEvalPrintMain()
 	}
 	fmt.Println("Bye")
 }
