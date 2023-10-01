@@ -20,9 +20,9 @@ type Profile struct {
 }
 
 // String is a Stringer to make a (JSON) string representation of a Profile.
-// JSON format is indented and omits blank fields.
+// JSON format omits blank fields.
 func (p Profile) String() string {
-	bytes, err := json.MarshalIndent(p, "    ", " ")
+	bytes, err := json.MarshalIndent(p, "", " ")
 	if err != nil {
 		// This shouldn't happen
 		return "{\"error\":\"something went wrong\"}"
