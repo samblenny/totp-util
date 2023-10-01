@@ -18,7 +18,7 @@ type Menu []Item
 
 // === Global Data ===
 
-const VERSION string = "0.2.0"
+const VERSION string = "0.3.0"
 
 var quitRequested = false
 var backRequested = false
@@ -153,7 +153,7 @@ func readEvalPrintEdit() {
 		tmpProfile = Profile{}
 	case line == "b":
 		backRequested = true
-	case line == "q!":
+	case line == "q":
 		quitRequested = true
 	default:
 		fmt.Println("Unrecognized input. Try '?' to show menu.")
