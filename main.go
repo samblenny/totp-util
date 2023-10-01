@@ -33,6 +33,7 @@ var mainMenu Menu = Menu{
 	{"fetch <n>    ", "Fetch profile <n> into tmp for <n> in range 0 to 9"},
 	{"store <n>    ", "Store tmp as profile <n> for <n> in range 0 to 9"},
 	{"burn <n>     ", "Burn profile <n> to token for <n> in range 0 to 9"},
+	{"t            ", "Show TOTP code for tmp profile"},
 	{"q!           ", "Quit without saving changes"},
 }
 var editMenu Menu = Menu{
@@ -155,6 +156,18 @@ func burnProfile(index int) {
 	}
 }
 
+func showTotp(p Profile) {
+	t, err := NewTotp(p.Secret, p.Digits, p.Algorithm, p.Period)
+	if err != nil {
+		fmt.Println("Unable to show TOTP.", err)
+	}
+	if code, validSeconds, err := t.CurrentCode(); err != nil {
+		fmt.Printf("TotpCode() error: %v\n", err)
+	} else {
+		fmt.Printf("%v  (%v seconds left)\n", code, validSeconds)
+	}
+}
+
 // === Control Logic ===
 
 func readEvalPrintEdit() {
@@ -265,6 +278,8 @@ func readEvalPrintMain() {
 		}
 	case missingRE.MatchString(line):
 		warnMissingProfileArg()
+	case line == "t":
+		showTotp(tmpProfile)
 	case line == "q!":
 		quitRequested = true
 	default:
