@@ -19,7 +19,7 @@ type Menu []Item
 
 // === Global Data ===
 
-const VERSION string = "0.4.0"
+const VERSION string = "0.4.1"
 
 var quitRequested = false
 var mainMenu Menu = Menu{

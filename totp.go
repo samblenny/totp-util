@@ -85,16 +85,29 @@ func NewTotp(secret, digits, algorithm, period string) (*Totp, error) {
 	// with some "=" or "%3D". So, be cautious and start with a url-unescape.
 	// See previously mentioned documentation wiki page and RFC3548 §2.2:
 	//  https://datatracker.ietf.org/doc/html/rfc3548#section-2.2
-	unescapedSecret, err := url.QueryUnescape(secret)
-	switch {
-	case err != nil:
-		msg += " Secret value is weird (query unescape stage failed)."
-	case secret == "":
+	if unescapedSecret, err := url.QueryUnescape(secret); err != nil {
+		msg += fmt.Sprintf(
+			" Secret value is weird (query unescape failed: \"%v\", %v).",
+			secret, err.Error())
+	} else if secret == "" {
 		msg += " Secret value is blank."
-	default:
+	} else {
+		// The wiki URI docs say the "=" suffix padding is not needed, but Go's
+		// base32 decoder seems to want padding for strings that are not an
+		// exact multiple of eight characters. So, add padding.
+		padLen := 8 - (len(unescapedSecret) % 8)
+		if padLen == 8 {
+			padLen = 0
+		}
+		for i := 0; i < padLen; i++ {
+			unescapedSecret += "="
+		}
+		// Now decode the padded base32
 		t.Secret, err = base32.StdEncoding.DecodeString(unescapedSecret)
 		if err != nil {
-			msg += " Secret value is weird (base32 decode stage failed)."
+			msg += fmt.Sprintf(
+				" Secret value is weird (base32 decode failed: \"%v\", %v).",
+				unescapedSecret, err.Error())
 		}
 	}
 	// Bail out with an error if any of the validation checks failed

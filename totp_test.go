@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha1"
-	"testing"
 	"strings"
+	"testing"
 )
 
 type TestVector struct {
@@ -16,7 +16,7 @@ type TestVector struct {
 }
 
 // TestVectors holds RFC6238 Appendix B SHA1 and SHA256 test vectors. I'm
-// ignoring SHA512 because it is not commonly supoorted. Appendix B states that
+// ignoring SHA512 because it is not commonly supported. Appendix B states that
 // time step is 30 seconds and shared secret is ASCII "12345678901234567890".
 // But, the code in Appendix B uses an extended (repeats first 12 bytes)
 // version of that key. So, I'm not sure yet about the keys.
@@ -174,6 +174,47 @@ func Test_supported_periods(t *testing.T) {
 		_, err := NewTotp(secret, "", "", period)
 		if err != nil {
 			t.Error("\ntried:", period, "\ngot:", err.Error())
+		}
+	}
+}
+
+// Attempting to use non-multiple-of-8-length secret values should work, as
+// long as the values are valid base32. Note that you can't just make an
+// arbitrary length string from base32 symbols and expect the result will parse
+// as a valid base32 string. Go's base32 decoder seems to want the strings to
+// be padded with "=" at the end if they aren't otherwise a multiple of 8
+// characters long. If you give the decoder a string that's an exact multiple
+// of 8 base32 symbols long, probably it will be fine. If you give a "=" padded
+// string that is a multiple of 8 long, but with an odd number of base32
+// symbols before the "=", it may give an error. If you give weird stuff like
+// "AB" that an encoder wouldn't emit, it still may parse without errors.
+func Test_weird_but_valid_secrets(t *testing.T) {
+	notMultEightButWellFormed := []string{
+		"AA", "AE", "AI", "AM", "AQ", "AU", "AY", "A4======", "ABCDEFGHAA",
+		"ABAA====", "ACAA===="}
+	for _, secret := range notMultEightButWellFormed {
+		_, err := NewTotp(secret, "", "", "")
+		if err != nil {
+			t.Error("\ntried:", secret, "\ngot:", err.Error())
+		}
+	}
+	// Is this a bug in Go's decoder? These have some dangling bits on the end
+	// but the decoder doesn't seem to mind?
+	badlyEncodedButStillPassing := []string{
+		"AB", "AC", "AD" }
+	for _, secret := range badlyEncodedButStillPassing {
+		_, err := NewTotp(secret, "", "", "")
+		if err != nil {
+			t.Error("\ntried:", secret, "\ngot:", err.Error())
+		}
+	}
+	// The decoder does not like odd numbers of base32 symbols
+	badlyEncodedFailing := []string{
+		"ABA", "ACA", "ADA" }
+	for _, secret := range badlyEncodedFailing {
+		totp, err := NewTotp(secret, "", "", "")
+		if err == nil {
+			t.Error("\nWanted decoder error:", secret, "\ngot:", totp.Secret)
 		}
 	}
 }
