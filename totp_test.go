@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"testing"
+	"strings"
 )
 
 type TestVector struct {
@@ -94,6 +95,85 @@ func Test_RFC2202_HMAC_SHA1_test_cases(t *testing.T) {
 		digest := h.Sum(nil)
 		if !bytes.Equal(digest, v.Digest) {
 			t.Error("\ni:", i, "\nwanted:", v.Digest, "\ngot:", digest)
+		}
+	}
+}
+
+// Attempting to use a blank secret should fail
+func Test_blank_secret(t *testing.T) {
+	secret := ""
+	digits := ""
+	algorithm := ""
+	period := ""
+	wantError := "Secret value is blank."
+	_, err := NewTotp(secret, digits, algorithm, period)
+	if err != nil && !strings.Contains(err.Error(), wantError) {
+		t.Error("\nwanted:", wantError, "\ngot:", err.Error())
+	}
+}
+
+// Attempting to use an unsupported period should fail
+func Test_unsupported_period(t *testing.T) {
+	secret := "JBSWY3DPEHPK3PXP"
+	period := "29"
+	wantError := "Period should be empty, \"30\", or \"60\"."
+	_, err := NewTotp(secret, "", "", period)
+	if err != nil && !strings.Contains(err.Error(), wantError) {
+		t.Error("\nwanted:", wantError, "\ngot:", err.Error())
+	}
+}
+
+// Attempting to use an unsupported algorithm should fail
+func Test_unsupported_algorithm(t *testing.T) {
+	secret := "JBSWY3DPEHPK3PXP"
+	algorithm := "MD5"
+	wantError := "Algorithm should be empty, \"SHA1\", or \"SHA256\"."
+	_, err := NewTotp(secret, "", algorithm, "")
+	if err != nil && !strings.Contains(err.Error(), wantError) {
+		t.Error("\nwanted:", wantError, "\ngot:", err.Error())
+	}
+}
+
+// Attempting to use an unsupported digits value should fail
+func Test_unsupported_digits(t *testing.T) {
+	secret := "JBSWY3DPEHPK3PXP"
+	digits := "7"
+	wantError := "Digits should be empty, \"6\", or \"8\"."
+	_, err := NewTotp(secret, digits, "", "")
+	if err != nil && !strings.Contains(err.Error(), wantError) {
+		t.Error("\nwanted:", wantError, "\ngot:", err.Error())
+	}
+}
+
+// Attempting to use supported digits values should work
+func Test_supported_digits(t *testing.T) {
+	secret := "JBSWY3DPEHPK3PXP"
+	for _, digits := range []string{"6", "8"} {
+		_, err := NewTotp(secret, digits, "", "")
+		if err != nil {
+			t.Error("\ntried:", digits, "\ngot:", err.Error())
+		}
+	}
+}
+
+// Attempting to use supported algorithms should work
+func Test_supported_algorithms(t *testing.T) {
+	secret := "JBSWY3DPEHPK3PXP"
+	for _, algorithm := range []string{"SHA1", "SHA256"} {
+		_, err := NewTotp(secret, "", algorithm, "")
+		if err != nil {
+			t.Error("\ntried:", algorithm, "\ngot:", err.Error())
+		}
+	}
+}
+
+// Attempting to use supported periods should work
+func Test_supported_periods(t *testing.T) {
+	secret := "JBSWY3DPEHPK3PXP"
+	for _, period := range []string{"30", "60"} {
+		_, err := NewTotp(secret, "", "", period)
+		if err != nil {
+			t.Error("\ntried:", period, "\ngot:", err.Error())
 		}
 	}
 }

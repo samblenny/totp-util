@@ -7,10 +7,9 @@ import (
 	"strings"
 )
 
-// Profile holds the fields of a TOTP QR Code URI plus a custom title.
+// Profile holds the fields of a TOTP QR Code URI.
 type Profile struct {
 	URI       string `json:"URI,omitempty"`
-	Title     string `json:"title,omitempty"`
 	Issuer    string `json:"issuer,omitempty"`
 	Account   string `json:"account,omitempty"`
 	Secret    string `json:"secret,omitempty"`

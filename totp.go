@@ -86,9 +86,12 @@ func NewTotp(secret, digits, algorithm, period string) (*Totp, error) {
 	// See previously mentioned documentation wiki page and RFC3548 §2.2:
 	//  https://datatracker.ietf.org/doc/html/rfc3548#section-2.2
 	unescapedSecret, err := url.QueryUnescape(secret)
-	if err != nil {
+	switch {
+	case err != nil:
 		msg += " Secret value is weird (query unescape stage failed)."
-	} else {
+	case secret == "":
+		msg += " Secret value is blank."
+	default:
 		t.Secret, err = base32.StdEncoding.DecodeString(unescapedSecret)
 		if err != nil {
 			msg += " Secret value is weird (base32 decode stage failed)."
