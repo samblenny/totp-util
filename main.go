@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"time"
 )
 
 // === Types ===
@@ -18,63 +19,43 @@ type Menu []Item
 
 // === Global Data ===
 
-const VERSION string = "0.3.0"
+const VERSION string = "0.4.0"
 
 var quitRequested = false
-var backRequested = false
 var mainMenu Menu = Menu{
 	{"?            ", "Show menu"},
-	{"pr           ", "Print profile"},
+	{"p            ", "Print profile"},
 	{"otpauth://...", "Parse TOTP QR Code URI into profile"},
-	{"ed           ", "Edit profile"},
-	{"burn         ", "Burn profile to hardware token"},
-	{"t            ", "Show TOTP code for profile"},
-	{"q            ", "Quit"},
-}
-var editMenu Menu = Menu{
-	{"?            ", "Show menu"},
-	{"pr           ", "Print profile"},
-	{"otpauth://...", "Parse TOTP QR Code URI into profile"},
-	{"URI=<s>      ", "Set URI to <s> (should follow TOTP QR Code format)"},
-	{"title=<s>    ", "Set title to <s> (a short hardware token profile title)"},
-	{"issuer=<s>   ", "Set issuer to <s> (must not contain \":\" or \"%3A\")"},
-	{"account=<s>  ", "Set account to <s> (must not contain \":\" or \"%3A\")"},
 	{"secret=<s>   ", "Set secret to <s> (must be base32 string)"},
 	{"algorithm=<s>", "Set algorithm to <s> (can be empty, \"SHA1\" or \"SHA256\")"},
 	{"digits=<s>   ", "Set digits to <s> (can be empty, \"6\", or \"8\")"},
 	{"period=<s>   ", "Set period to <s> (can be empty, \"30\", or \"60\")"},
 	{"clr          ", "Clear profile"},
-	{"b            ", "Go Back to main menu"},
+	{"t            ", "Show updating TOTP code (press Enter key to stop)"},
 	{"q            ", "Quit"},
 }
 var tmpProfile = Profile{}
 
-// === Message Printers ===
-
-func showMenu(m Menu) {
+// ShowMenu prints a list of menu options
+func ShowMenu(m Menu) {
 	for _, item := range m {
 		fmt.Printf(" %v - %v\n", item.Syntax, item.Description)
 	}
 }
 
-// === Input Scanners ===
-
-var scanner *bufio.Scanner = bufio.NewScanner(os.Stdin)
-
-func scan(prompt string) (result string) {
-	fmt.Printf("%v", prompt)
-	scanner.Scan()
-	result = scanner.Text()
-	return
+// StdinReaderRoutine emits lines of input read from stdin
+func StdinReaderRoutine(inputChan chan string, scanner *bufio.Scanner) {
+	for {
+		// Wait for a line of input
+		scanner.Scan()
+		// Toss it down the channel
+		inputChan <- scanner.Text()
+	}
 }
 
-// === Menu Action Handlers ===
-
-func printProfile() {
-	fmt.Printf("%v\n", tmpProfile)
-}
-
-func parseURI(line string) {
+// ParseURI parses a URI in the TOTP auth app QR code URI format and uses its
+// query parameters to configure the current TOTP profile.
+func ParseURI(line string) {
 	tmpProfile = NewProfileFromURI(line)
 	hiddenURI := tmpProfile.URI
 	tmpProfile.URI = ""
@@ -82,65 +63,70 @@ func parseURI(line string) {
 	tmpProfile.URI = hiddenURI
 }
 
-func burnProfile() {
-	printProfile()
-	msg := fmt.Sprintf("Burn to token? Are you sure? [y/N]: ")
-	switch scan(msg) {
-	case "y", "Y":
-		fmt.Println("[TODO: burn burn burn]") // TODO
-	default:
-		fmt.Println("[burn canceled]")
-	}
-}
-
-func showTotp(p Profile) {
+// ShowTotp shows TOTP codes for the currently configured profile.
+func ShowTotp(p Profile, inputChan chan string, ticker *time.Ticker) {
 	t, err := NewTotp(p.Secret, p.Digits, p.Algorithm, p.Period)
 	if err != nil {
-		fmt.Println("Unable to show TOTP.", err)
+		fmt.Println("Unable to show TOTP: unsupported parameter value\n", err)
+		return
 	}
-	if code, validSeconds, err := t.CurrentCode(); err != nil {
-		fmt.Printf("TotpCode() error: %v\n", err)
-	} else {
-		fmt.Printf("%v  (%v seconds left)\n", code, validSeconds)
+	// Start a loop to display the TOTP code, updating every second. The loop
+	// monitors the input scanner channel and stops once a line of input is
+	// received.
+	fmt.Printf("To stop displaying TOTP codes, use the Enter key.\n\n")
+	for {
+		// Block this thread until one of the channels has a message available
+		select {
+		case _ = <-inputChan:
+			// End the loop when Enter is pressed
+			fmt.Println()
+			return
+		case _ = <-ticker.C:
+			// Generate a new code when the timer ticks
+			if code, validSeconds, err := t.CurrentCode(); err != nil {
+				fmt.Printf("TotpCode() error: %v\n", err)
+				return
+			} else {
+				pad := ""
+				if validSeconds < 10 {
+					pad = " "
+				}
+				fmt.Printf("\r(%vs) %v %v  ", validSeconds, pad, code)
+			}
+		}
 	}
 }
 
-// === Control Logic ===
-
-func readEvalPrintEdit() {
-	prompt := "ed> "
-	line := scan(prompt)
-	keyValRE := regexp.MustCompile(
-		`^(URI|title|issuer|account|secret|algorithm|digits|period)=(.*)`)
+// WaitForMenuChoice responds to inputs at the main menu prompt.
+func HandleMenuChoice(inputChan chan string, ticker *time.Ticker) {
+	// Get line of input from channel connected to the stdin reader goroutine
+	line := <-inputChan
+	// Use regular expressions to check for the more complex menu options
+	goodUriRE := regexp.MustCompile(`^otpauth://totp/`)
+	otherUriRE := regexp.MustCompile(`^otpauth://`)
+	keyValRE := regexp.MustCompile(`^(secret|algorithm|digits|period)=(.*)`)
 	matches := keyValRE.FindStringSubmatch(line)
-	n := len(matches)
 	key := ""
 	val := ""
-	if n == 2 || n == 3 {
+	if len(matches) == 2 || len(matches) == 3 {
 		key = matches[1]
 	}
-	if n == 3 { // Right-hand side of a key=value menu item can be blank
+	if len(matches) == 3 { // Right-hand side of key=value can be blank
 		val = matches[2]
 	}
+	// Match the input line against simple and complex menu options
 	switch {
 	case line == "":
 		// NOP
 	case line == "?":
-		showMenu(editMenu)
-	case line == "pr":
-		printProfile()
+		ShowMenu(mainMenu)
+	case line == "p":
+		fmt.Printf("%v\n", tmpProfile)
 	case goodUriRE.MatchString(line):
-		parseURI(line)
+		ParseURI(line)
+		ShowTotp(tmpProfile, inputChan, ticker)
 	case otherUriRE.MatchString(line):
-		fmt.Println("URI format not recognized. Try 'ed' to enter manually?")
-	case key == "URI":
-		tmpProfile.URI = val
-	case key == "title":
-		tmpProfile.Title = val
-	case key == "issuer":
-		tmpProfile.Issuer = val
-	case key == "account":
-		tmpProfile.Account = val
+		fmt.Println("URI format not recognized.")
 	case key == "secret":
 		tmpProfile.Secret = val
 	case key == "algorithm":
@@ -151,48 +137,8 @@ func readEvalPrintEdit() {
 		tmpProfile.Period = val
 	case line == "clr":
 		tmpProfile = Profile{}
-	case line == "b":
-		backRequested = true
-	case line == "q":
-		quitRequested = true
-	default:
-		fmt.Println("Unrecognized input. Try '?' to show menu.")
-	}
-}
-
-func editMenuLoop() {
-	backRequested = false
-	showMenu(editMenu)
-	for !quitRequested && !backRequested {
-		readEvalPrintEdit()
-	}
-	backRequested = false
-}
-
-var goodUriRE *regexp.Regexp = regexp.MustCompile(`^otpauth://totp/`)
-var otherUriRE *regexp.Regexp = regexp.MustCompile(`^otpauth://`)
-
-func readEvalPrintMain() {
-	prompt := "> "
-	line := scan(prompt)
-	switch {
-	case line == "":
-		// NOP
-	case line == "?":
-		showMenu(mainMenu)
-	case line == "pr":
-		printProfile()
-	case goodUriRE.MatchString(line):
-		parseURI(line)
-		showTotp(tmpProfile)
-	case otherUriRE.MatchString(line):
-		fmt.Println("URI format not recognized. Try 'ed' to enter manually?")
-	case line == "ed":
-		editMenuLoop()
-	case line == "burn":
-		burnProfile()
 	case line == "t":
-		showTotp(tmpProfile)
+		ShowTotp(tmpProfile, inputChan, ticker)
 	case line == "q":
 		quitRequested = true
 	default:
@@ -201,24 +147,25 @@ func readEvalPrintMain() {
 }
 
 func main() {
+	// Show startup banner and menu options
 	fmt.Printf("totp-util v%v\n", VERSION)
-	showMenu(mainMenu)
+	ShowMenu(mainMenu)
+
+	// Start a goroutine to read lines from stdin in a separate thread so the
+	// input scanning doesn't block the updating TOTP code display on stdout
+	scanner := bufio.NewScanner(os.Stdin)
+	inputChan := make(chan string, 100)
+	go StdinReaderRoutine(inputChan, scanner)
+
+	// Start a 1 second tick timer
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	// Run the event loop in the main thread
+	prompt := "> "
 	for !quitRequested {
-		readEvalPrintMain()
+		fmt.Printf(prompt)
+		HandleMenuChoice(inputChan, ticker)
 	}
 	fmt.Println("Bye")
 }
-
-/*
-Plans:
-
-1. File format & extension: Maybe use .pem ?
-   https://en.wikipedia.org/wiki/Privacy-Enhanced_Mail
-   https://www.rfc-editor.org/rfc/rfc1422
-
-2. Encrypt database with passcode -> argon2id -> chacha20poly1305
-
-2. Read passwords without local echo:
-   https://pkg.go.dev/golang.org/x/term#ReadPassword
-
-*/
