@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clock</title>
+<style>
+ :root{--F: #88dbb2; --B: #1d1d1d; --H: #32ea39; --L: #3a3a3a; }
+ @media (prefers-color-scheme: light){
+  :root{--F: #24513e; --B: #efefef; --H: #053a16; --L: #c7c7c7; }}
+ html{ background: var(--B); -webkit-text-size-adjust: none; }
+ body{ background: var(--B); color: var(--F); min-height: 100vh;
+  width: 100%; font-family: sans-serif; font-size: 18px; }
+ html,body,h1,h2,main{ margin: 0; padding: 0; box-sizing: border-box; }
+ code,p,td{ line-height: 1.23em; }
+ h1{ margin: 20px 0 15px -3px; font-size: 36px; color: var(--H); }
+ h2{ margin: 33px 0 15px -3px; font-size: 24px; color: var(--H); }
+ table{ margin: 11px 0; border-collapse: collapse; width: 90% }
+ table,td{ border: 1px solid var(--L); }
+ td{ padding: 10px; }
+ td:first-child{ width: 17%; }
+ p,canvas{ margin: 11px 0; }
+ main{ margin: 0 auto; padding: 2px 25px 15px 25px; max-width: 600px; }
+ #barcode{ margin: 11px 0; border: 1px solid var(--L); }
+</style>
+</head>
+<body id="body">
+<main>
+<h1>Clock</h1>
+<table>
+<tr><td>Unix:</td> <td><code id="unix"></code></td></tr>
+<tr><td>local:</td><td><code id="local"></code></td> </tr>
+<tr><td>UTC:</td>  <td><code id="utc"></code></td> </tr>
+</table>
+<h2>Set Linux Time</h2>
+<p><code id="dateSet">date --utc MMDDhhmmCCYY.ss</code></p>
+<canvas id="barcode" width="200" height="200"></canvas>
+
+<script>
+"use strict";
+let unixTd   = document.querySelector("#unix");
+let utcTd    = document.querySelector("#utc");
+let localTd  = document.querySelector("#local");
+let dateSetP = document.querySelector("#dateSet");
+let barcodeCanvas = document.querySelector("#barcode");
+let ctx = barcodeCanvas.getContext("2d");
+
+// Pad with 0 to get a two digit string
+function pad(n) {
+    return (n<10) ? `0${n}` : `${n}`;
+}
+
+// Update the clock and schedule another update after one second
+// CAUTION! The Javascript Date API is weird (see comments below)
+function updateClock() {
+    // Unix time
+    let unix_second = Math.floor(Date.now() / 1000);
+    let unix_ms = unix_second * 1000;
+    let unix = `${unix_second}`;
+    // UTC time
+    let d = new Date();
+    d.setTime(unix_ms);
+    let mon  = pad(d.getUTCMonth() + 1) // month is zero-indexed
+    let day  = pad(d.getUTCDate())      // getUTCDate() gives day of the month
+    let hour = pad(d.getUTCHours())
+    let min  = pad(d.getUTCMinutes())
+    let year = d.getUTCFullYear()
+    let sec  = pad(d.getUTCSeconds())
+    let utc = `${year}-${mon}-${day} ${hour}:${min}:${sec}`;
+    // Date-setting command
+    let dateSet = `date --utc ${mon}${day}${hour}${min}${year}.${sec}`
+    // Local time
+    mon  = pad(d.getMonth() + 1) // month is zero-indexed
+    day  = pad(d.getDate())      // getDate() gives day of the month
+    hour = pad(d.getHours())
+    min  = pad(d.getMinutes())
+    year = d.getFullYear()
+    sec  = pad(d.getSeconds())
+    let local = `${year}-${mon}-${day} ${hour}:${min}:${sec}`;
+
+    // TODO: make a barcode
+    let barcode = null;
+
+    // Update the DOM elements
+    unixTd.innerHTML = unix;
+    utcTd.innerHTML = utc;
+    localTd.innerHTML = local;
+    dateSetP.innerHTML = dateSet;
+    // Schedule an update for the following second
+    let ms = 1000 - (Date.now() % 1000);
+    window.setTimeout(updateClock, ms);
+}
+
+// Start the reccuring clock updater
+updateClock();
+</script>
+</main>
+</body>
+</html>
