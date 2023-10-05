@@ -48,23 +48,129 @@ let localTd  = document.querySelector("#local");
 let dateSetP = document.querySelector("#dateSet");
 let qrCanvas = document.querySelector("#qrCanvas");
 let qrCtx    = qrCanvas.getContext("2d");
-const qrVersion = 1;     // Fits 14 digits (MMDDHHMMCCYYss) with ECC=H
 
 class QRCode {
-    static numericRE = /^[0-9]+$/; // Regular expression for numeric data
-    static pxPerModule = 5;        // Size of QR code module in pixels
-    static quiet = 4;              // Width of quiet zone in modules
-    static ecc = "H";              // Error correction level
+    static oneshotArmed = true; // TODO: remove this
 
-    // Encode data as a numeric QR code
-    constructor(data) {
-        if(!data.match(QRCode.numericRE)) {
-            console.error("QRCode(): Unsupported data format:", data);
-            throw new Error("QRCode only supports numeric data");
+    static numericRE = /^[0-9]+$/; // Regular expression for numeric data
+    static pxPerModule = 5;   // Size of QR code module in pixels
+    static quiet = 4;         // Width of quiet zone in modules
+    static version = 1;       // Fits 14 digits (MMDDHHMMCCYYss)
+    static ecc = "H";         // Error correction level
+    static maxDigits = 17;    // Version 1-H fits up to 17 digits
+    static dataBits = 72;     // Version 1-H number of data bits
+    static dataCodewords = 9; // Version 1-H number of codewords
+    static ecCodewords = 17;  // Ver 1-H number of error correction codewords
+    static ecPVal = 1;        // Ver 1-H value of error correction p
+    static ecBlocks = 1;      // Ver 1-H number of error correction blocks
+
+    // Convert integer to bit array (MSB first) and append to bitstream.
+    // For example n=5, numBits=4 would append [0,1,0,1] to stream.
+    static appendAsBits(stream, n, numBits) {
+        for(let shift=numBits-1; shift>=0; shift--) {
+            stream.push((n>>shift) & 1);
         }
-        this.mode = "numeric";
-        this.data = data;
-        this.version = qrVersion;
+    }
+
+    // Encode data as a numeric mode QR code bitstream
+    constructor(data) {
+        // TODO: remove the oneshot bypass mechanism. It exists to prevent huge
+        // console.log debug spew as I work on implementing the QR code spec.
+        if(!QRCode.oneshotArmed) {
+            return;
+        } else {
+            QRCode.oneshotArmed = false;
+            console.log("oneshot logger enable is now off");
+        }
+        if(!data.match(QRCode.numericRE)) {
+            throw new Error("Unsupported data format (non-numeric characters):"
+                + ` ${data}`);
+        }
+        if(data.length > QRCode.maxDigits) {
+            let msg = `Version ${QRCode.version} ECC ${QRCode.ecc} can fit up `
+                + `to ${QRCode.maxDigits} digits, ${data.length} is too long`;
+            throw new Error(msg);
+        }
+        // Convert string of ASCII numeric digits, /[0-9]+/ into an array of
+        // equivalent decimal integers. Note that "0" is 0x30 and "9" is 0x39.
+        let characters = Array.from(data);
+        const digits = characters.map((c) => c.charCodeAt(0) & 0xf);
+        console.log("digits:", digits);
+        // Pack data bitstream. Segments begin with most significant bit
+        // 1. Numeric mode indicator (0b0001, 4 bits, MSB first)
+        let stream = new Array();
+        QRCode.appendAsBits(stream, 0b0001, 4);
+        // 2. Version 1 numeric mode character count indicator (10 bits).
+        QRCode.appendAsBits(stream, digits.length, 10);
+        // 3. Pack data digits:
+        //    First pack each full of 3 digits (range 000..999) as 10 bits.
+        //    If 2 digits are left over (range 00..99), pack them as 7 bits.
+        //    If only 1 digit is left over (range 0..9), pack it as 4 bits.
+        const trigrams = Math.floor(digits.length / 3);
+        for(let i=0; i<trigrams*3; i+=3) {
+            let n = (digits[i]*100) + (digits[i+1]*10) + digits[i+2];
+            QRCode.appendAsBits(stream, n, 10);
+        }
+        const digitsRemainder = digits.length % 3;
+        if(digitsRemainder == 2) {             // Last 2 digits as 7 bits
+            const i = digits.length - 2;
+            const n = (digits[i]*10) + digits[i+1];
+            QRCode.appendAsBits(stream, n, 7);
+        } else if(digitsRemainder == 1) {      // Final digit as 4 bits
+            const i = digits.length - 1;
+            QRCode.appendAsBits(stream, digits[i], 4);
+        }
+        // 4. Pack Terminator sequence (0b0000, 4 bits, or abbreviate to fit)
+        const untermLen = stream.length;
+        const availableBits = QRCode.maxDataBits - untermLen;
+        if(availableBits > 0) {
+            if (availableBits < 4) {
+                QRCode.appendAsBits(stream, 0b0000, availableBits);
+            } else {
+                QRCode.appendAsBits(stream, 0b0000, 4);
+            }
+        }
+        // 5. Pad data bit stream with minimum number of 0's that will give a
+        //    stream length that is a multiple of 8 bits
+        const unpaddedBitsLen = stream.length;
+        console.log("unpaddedBitsLen:", unpaddedBitsLen);
+        const extraBits = unpaddedBitsLen % 8;
+        if(extraBits > 0) {
+            QRCode.appendAsBits(stream, 0, 8-extraBits);
+        }
+        console.log("stream:", stream);
+        console.log("stream.length:", stream.length);
+        // 6. Convert bit stream to codewords
+        const paddedBitsLen = stream.length;
+        const unpaddedCWLen = Math.floor(paddedBitsLen / 8);
+        console.log("paddedBitsLen:", paddedBitsLen);
+        console.log("unpaddedCWLen:", unpaddedCWLen);
+        let codewords = new Array();
+        for(let i=0; i<unpaddedCWLen; i++) {
+            let bits = stream.slice(i*8, (i+1)*8);
+            const initialVal = 0;
+            let n = bits.reduce((acc, curr) => (acc*2) + curr, initialVal);
+            codewords.push(n);
+        }
+        console.log("codewords:", codewords);
+        console.log("codewords.length:", codewords.length);
+        // 7. Add alternating Pad codewords to reach the full data codeword
+        //    capacity of this symbol version
+        const padCWNeeded = QRCode.dataCodewords - codewords.length;
+        const padCWDiv2 = padCWNeeded >> 1;
+        const alternatingPad1 = 0b11101100;
+        const alternatingPad2 = 0b00010001;
+        for(let i=0; i<(padCWNeeded>>1); i++) { // Divisible by 2 padding
+            codewords.push(alternatingPad1);
+            codewords.push(alternatingPad2);
+        }
+        if((padCWNeeded & 1) == 1) {            // Remainder %2 padding
+            codewords.push(alternatingPad1);
+        }
+        console.log("padded codewords:", codewords);
+        console.log("padded codewords.length:", codewords.length);
+
+        // TODO: finish this (EC codewords, etc)
     }
 
     // Draw QR code 1:1:3:1:1 finder pattern with top-left coordinate (x,y).
@@ -82,7 +188,7 @@ class QRCode {
     // the right edges of the two leftmost finder patterns.
     drawClockRows(ctx) {
         const p = QRCode.pxPerModule;
-        const count = 1 + (2 * this.version);
+        const count = 1 + (2 * QRCode.version);
         // Calculate (x,y) for horizontal row, swap coords for vertical row
         let x0 = QRCode.quiet + 8;
         let y = (QRCode.quiet + 6) * p;
@@ -103,7 +209,7 @@ class QRCode {
         ctx.strokeStyle = "black";
         ctx.lineWidth = QRCode.pxPerModule;
         const q = QRCode.quiet;
-        const offset = 10 + (this.version * 4);
+        const offset = 10 + (QRCode.version * 4);
         this.drawFinderPattern(ctx, q, q);
         this.drawFinderPattern(ctx, q + offset, q);
         this.drawFinderPattern(ctx, q, q + offset);
@@ -190,7 +296,7 @@ function updateClock() {
 }
 
 // Prepare the canvas
-sizeCanvas(qrVersion, QRCode.pxPerModule, QRCode.quiet);
+sizeCanvas(QRCode.version, QRCode.pxPerModule, QRCode.quiet);
 // Start the reccuring clock updater
 updateClock();
 </script>
