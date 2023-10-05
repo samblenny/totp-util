@@ -21,10 +21,11 @@
  td:first-child{ width: 17%; }
  p,canvas{ margin: 11px 0; }
  main{ margin: 0 auto; padding: 2px 25px 15px 25px; max-width: 600px; }
- #barcode{ margin: 11px 0; border: 1px solid var(--L); }
+ #barcode{ margin: 11px 0; border: 1px solid var(--L);
+  image-rendering: pixelated; }
 </style>
 </head>
-<body id="body">
+<body>
 <main>
 <h1>Clock</h1>
 <table>
@@ -33,8 +34,11 @@
 <tr><td>UTC:</td>  <td><code id="utc"></code></td> </tr>
 </table>
 <h2>Set Linux Time</h2>
-<p><code id="dateSet">date --utc MMDDhhmmCCYY.ss</code></p>
-<canvas id="barcode" width="200" height="200"></canvas>
+<p><code id="dateSet">
+If you can read this, check the developer tools console log for errors.
+</code></p>
+<canvas id="qrCanvas" width="145" height="145"></canvas>
+</main>
 
 <script>
 "use strict";
@@ -42,58 +46,153 @@ let unixTd   = document.querySelector("#unix");
 let utcTd    = document.querySelector("#utc");
 let localTd  = document.querySelector("#local");
 let dateSetP = document.querySelector("#dateSet");
-let barcodeCanvas = document.querySelector("#barcode");
-let ctx = barcodeCanvas.getContext("2d");
+let qrCanvas = document.querySelector("#qrCanvas");
+let qrCtx    = qrCanvas.getContext("2d");
+const qrVersion = 1;     // Fits 14 digits (MMDDHHMMCCYYss) with ECC=H
+
+class QRCode {
+    static numericRE = /^[0-9]+$/; // Regular expression for numeric data
+    static pxPerModule = 5;        // Size of QR code module in pixels
+    static quiet = 4;              // Width of quiet zone in modules
+    static ecc = "H";              // Error correction level
+
+    // Encode data as a numeric QR code
+    constructor(data) {
+        if(!data.match(QRCode.numericRE)) {
+            console.error("QRCode(): Unsupported data format:", data);
+            throw new Error("QRCode only supports numeric data");
+        }
+        this.mode = "numeric";
+        this.data = data;
+        this.version = qrVersion;
+    }
+
+    // Draw QR code 1:1:3:1:1 finder pattern with top-left coordinate (x,y).
+    // Caller must set strokeStyle="black" and fillStyle="black".
+    drawFinderPattern(ctx, x, y) {
+        const p = QRCode.pxPerModule;
+        const half = p*0.5;
+        let side = (7*p)-p;
+        ctx.strokeRect((x*p)+half, (y*p)+half, side, side);
+        side = 3*p;
+        ctx.fillRect((x+2)*p, (y+2)*p, side, side);
+    }
+
+    // Draw clock rows between bottom edge of the two top finder patterns and
+    // the right edges of the two leftmost finder patterns.
+    drawClockRows(ctx) {
+        const p = QRCode.pxPerModule;
+        const count = 1 + (2 * this.version);
+        // Calculate (x,y) for horizontal row, swap coords for vertical row
+        let x0 = QRCode.quiet + 8;
+        let y = (QRCode.quiet + 6) * p;
+        for(let n=0; n<count; n++) {
+            let x = (x0 + (n*2)) * p;
+            ctx.fillRect(x, y, p, p); // Horizontal row
+            ctx.fillRect(y, x, p, p); // Vertical row (swapped x,y)
+        }
+    }
+
+    // Draw QR code to ctx, the 2d context of a canvas element
+    draw(ctx) {
+        // Clear canvas
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, ctx.width, ctx.height);
+        // Finder patterns
+        ctx.fillStyle = "black";
+        ctx.strokeStyle = "black";
+        ctx.lineWidth = QRCode.pxPerModule;
+        const q = QRCode.quiet;
+        const offset = 10 + (this.version * 4);
+        this.drawFinderPattern(ctx, q, q);
+        this.drawFinderPattern(ctx, q + offset, q);
+        this.drawFinderPattern(ctx, q, q + offset);
+        // Clock rows
+        this.drawClockRows(ctx);
+        // TODO:
+        // 1. Encode data:
+        //    - Make bit stream: Mode Indicator, Data Sequence, Terminator
+        //    - Split bit stream into 8-bit codewords
+        //    - Add Pad characters to fill codewords for version
+        // 2. Encode error correction:
+        //    - Divide codewords into blocks
+        //    - Generate EC codewords for blocks
+        //    - Append EC codewords to data codewords
+        // 3. Form message
+        //    - Interleave data and EC codewords
+        //    - Add remainder bits if needed
+        //    - Place codeword modules into matrix
+        // 4. Masking
+        //    - Measure symbol quality for each mask pattern
+        //    - Pick best mask pattern
+        // 5. Format version info
+        //    - Version, Mask, EC Level
+    }
+}
+
+
+// Configure the canvas to hold the right QR code version
+function sizeCanvas(version, pxPerModule, quietModules) {
+    const modules = 17 + (version * 4);
+    const quiet = quietModules * 2;
+    const width = (modules + quiet) * pxPerModule;
+    const height = (modules + quiet) * pxPerModule;
+    qrCanvas.width = width;
+    qrCanvas.height = height;
+    qrCtx.width = width;
+    qrCtx.height = height;
+}
 
 // Pad with 0 to get a two digit string
 function pad(n) {
     return (n<10) ? `0${n}` : `${n}`;
 }
 
-// Update the clock and schedule another update after one second
+// Update clock and schedule another update aligned to the next second
 // CAUTION! The Javascript Date API is weird (see comments below)
 function updateClock() {
     // Unix time
     let unix_second = Math.floor(Date.now() / 1000);
     let unix_ms = unix_second * 1000;
     let unix = `${unix_second}`;
-    // UTC time
     let d = new Date();
     d.setTime(unix_ms);
-    let mon  = pad(d.getUTCMonth() + 1) // month is zero-indexed
-    let day  = pad(d.getUTCDate())      // getUTCDate() gives day of the month
-    let hour = pad(d.getUTCHours())
-    let min  = pad(d.getUTCMinutes())
-    let year = d.getUTCFullYear()
-    let sec  = pad(d.getUTCSeconds())
-    let utc = `${year}-${mon}-${day} ${hour}:${min}:${sec}`;
-    // Date-setting command
-    let dateSet = `date --utc ${mon}${day}${hour}${min}${year}.${sec}`
     // Local time
-    mon  = pad(d.getMonth() + 1) // month is zero-indexed
-    day  = pad(d.getDate())      // getDate() gives day of the month
-    hour = pad(d.getHours())
-    min  = pad(d.getMinutes())
-    year = d.getFullYear()
-    sec  = pad(d.getSeconds())
+    let mon  = pad(d.getMonth() + 1) // month is zero-indexed
+    let day  = pad(d.getDate())      // getDate() gives day of the month
+    let hour = pad(d.getHours())
+    let min  = pad(d.getMinutes())
+    let year = d.getFullYear()
+    let sec  = pad(d.getSeconds())
     let local = `${year}-${mon}-${day} ${hour}:${min}:${sec}`;
-
-    // TODO: make a barcode
-    let barcode = null;
-
+    // UTC time
+    let uMon  = pad(d.getUTCMonth() + 1) // month is zero-indexed
+    let uDay  = pad(d.getUTCDate())      // getUTCDate() gives day of the month
+    let uHour = pad(d.getUTCHours())
+    let uMin  = pad(d.getUTCMinutes())
+    let uYear = d.getUTCFullYear()
+    let uSec  = pad(d.getUTCSeconds())
+    let utc = `${uYear}-${uMon}-${uDay} ${uHour}:${uMin}:${uSec}`;
+    // Linux shell date-setting command line example in the form:
+    //  date --utc MMDDhhmmCCYY.ss
+    let dateSet = `date --utc ${mon}${day}${hour}${min}${year}.${sec}`
+    // Date setting time argument encoded as a numeric QR code (omit the ".")
+    let qr = new QRCode(`${mon}${day}${hour}${min}${year}${sec}`);
+    qr.draw(qrCtx);
     // Update the DOM elements
     unixTd.innerHTML = unix;
     utcTd.innerHTML = utc;
     localTd.innerHTML = local;
     dateSetP.innerHTML = dateSet;
-    // Schedule an update for the following second
+    // Schedule another update aligned on transition to the next second
     let ms = 1000 - (Date.now() % 1000);
     window.setTimeout(updateClock, ms);
 }
 
+// Prepare the canvas
+sizeCanvas(qrVersion, QRCode.pxPerModule, QRCode.quiet);
 // Start the reccuring clock updater
 updateClock();
 </script>
-</main>
 </body>
 </html>
