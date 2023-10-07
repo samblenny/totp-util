@@ -13,12 +13,12 @@
   width: 100%; font-family: sans-serif; font-size: 18px; }
  html,body,h1,h2,main{ margin: 0; padding: 0; box-sizing: border-box; }
  code,p,td{ line-height: 1.23em; }
- h1{ margin: 20px 0 15px -3px; font-size: 36px; color: var(--H); }
- h2{ margin: 33px 0 15px -3px; font-size: 24px; color: var(--H); }
- table{ margin: 11px 0; border-collapse: collapse; width: 90% }
+ h1{ margin: 20px 0 15px -3px; font-size: 38px; color: var(--H); }
+ h2{ margin: 33px 0 15px -3px; font-size: 22px; color: var(--H); }
+ table{ margin: 11px 0; border-collapse: collapse; }
  table,td{ border: 1px solid var(--L); }
  td{ padding: 10px; }
- td:first-child{ width: 17%; }
+ td:last-child{ min-width: 22ch; }
  p,canvas{ margin: 11px 0; }
  main{ margin: 0 auto; padding: 2px 25px 15px 25px; max-width: 600px; }
  #barcode{ margin: 11px 0; border: 1px solid var(--L);
@@ -29,23 +29,21 @@
 <main>
 <h1>Clock</h1>
 <table>
-<tr><td>Unix:</td> <td><code id="unix"></code></td></tr>
-<tr><td>local:</td><td><code id="local"></code></td> </tr>
-<tr><td>UTC:</td>  <td><code id="utc"></code></td> </tr>
+<tr><td>UTC</td>  <td><code id="utc"></code></td> </tr>
 </table>
-<h2>Set Linux Time</h2>
-<p><code id="dateSet">
-If you can read this, check the developer tools console log for errors.
-</code></p>
+<h2>MMDDhhmmCCYYss</h2>
+<table>
+<tr><td>UTC</td>
+<td><code id="shell">Check developer tools console for errors</code></td>
+</tr>
+</table>
 <canvas id="qrCanvas" width="145" height="145"></canvas>
 </main>
 
 <script>
 "use strict";
-let unixTd   = document.querySelector("#unix");
-let utcTd    = document.querySelector("#utc");
-let localTd  = document.querySelector("#local");
-let dateSetP = document.querySelector("#dateSet");
+let utcP     = document.querySelector("#utc");
+let shellP   = document.querySelector("#shell");
 let qrCanvas = document.querySelector("#qrCanvas");
 let qrCtx    = qrCanvas.getContext("2d");
 
@@ -258,38 +256,30 @@ function pad(n) {
 // CAUTION! The Javascript Date API is weird (see comments below)
 function updateClock() {
     // Unix time
-    let unix_second = Math.floor(Date.now() / 1000);
-    let unix_ms = unix_second * 1000;
-    let unix = `${unix_second}`;
+    let unix_ms = 1000 * (Math.floor(Date.now() / 1000));
     let d = new Date();
     d.setTime(unix_ms);
-    // Local time
-    let mon  = pad(d.getMonth() + 1) // month is zero-indexed
-    let day  = pad(d.getDate())      // getDate() gives day of the month
-    let hour = pad(d.getHours())
-    let min  = pad(d.getMinutes())
-    let year = d.getFullYear()
-    let sec  = pad(d.getSeconds())
-    let local = `${year}-${mon}-${day} ${hour}:${min}:${sec}`;
     // UTC time
-    let uMon  = pad(d.getUTCMonth() + 1) // month is zero-indexed
-    let uDay  = pad(d.getUTCDate())      // getUTCDate() gives day of the month
-    let uHour = pad(d.getUTCHours())
-    let uMin  = pad(d.getUTCMinutes())
-    let uYear = d.getUTCFullYear()
-    let uSec  = pad(d.getUTCSeconds())
-    let utc = `${uYear}-${uMon}-${uDay} ${uHour}:${uMin}:${uSec}`;
-    // Linux shell date-setting command line example in the form:
-    //  date --utc MMDDhhmmCCYY.ss
-    let dateSet = `date --utc ${mon}${day}${hour}${min}${year}.${sec}`
-    // Date setting time argument encoded as a numeric QR code (omit the ".")
-    let qr = new QRCode(`${mon}${day}${hour}${min}${year}${sec}`);
+    let mon  = pad(d.getUTCMonth() + 1) // month is zero-indexed
+    let day  = pad(d.getUTCDate())      // getUTCDate() gives day of the month
+    let hour = pad(d.getUTCHours())
+    let min  = pad(d.getUTCMinutes())
+    let year = d.getUTCFullYear()
+    let sec  = pad(d.getUTCSeconds())
+    let utc = `${year}-${mon}-${day} ${hour}:${min}:${sec}`;
+    // Date string is intended for setting time on Linux, like:
+    //   date --utc MMDDhhmmCCYY.ss
+    //
+    // To encode the QR code more efficiently, only the numerals are included.
+    // This is meant for use with a wrapper script that will validate the
+    // numeric timestamp and format a `date ...` shell command string to set
+    // the time.
+    let shellTime = `${mon}${day}${hour}${min}${year}${sec}`
+    let qr = new QRCode(shellTime);
     qr.draw(qrCtx);
     // Update the DOM elements
-    unixTd.innerHTML = unix;
-    utcTd.innerHTML = utc;
-    localTd.innerHTML = local;
-    dateSetP.innerHTML = dateSet;
+    utcP.innerHTML = utc;
+    shellP.innerHTML = shellTime;
     // Schedule another update aligned on transition to the next second
     let ms = 1000 - (Date.now() % 1000);
     window.setTimeout(updateClock, ms);
