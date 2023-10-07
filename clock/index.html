@@ -80,18 +80,22 @@ class QRCode {
             QRCode.oneshotArmed = false;
             console.log("oneshot logger enable is now off");
         }
-        if(!data.match(QRCode.numericRE)) {
-            throw new Error("Unsupported data format (non-numeric characters):"
-                + ` ${data}`);
-        }
-        if(data.length > QRCode.maxDigits) {
-            let msg = `Version ${QRCode.version} ECC ${QRCode.ecc} can fit up `
-                + `to ${QRCode.maxDigits} digits, ${data.length} is too long`;
-            throw new Error(msg);
+        // Check that data can be encoded as version 1-H numeric QR code
+        {
+            if(!data.match(QRCode.numericRE)) {
+                throw new Error("Unsupported data format"
+                    + ` (non-numeric characters): ${data}`);
+            }
+            if(data.length > QRCode.maxDigits) {
+                let msg = `Version ${QRCode.version} ECC ${QRCode.ecc}`
+                    + ` can fit up to ${QRCode.maxDigits} digits,`
+                    + ` ${data.length} is too long`;
+                throw new Error(msg);
+            }
         }
         // Convert string of ASCII numeric digits, /[0-9]+/ into an array of
         // equivalent decimal integers. Note that "0" is 0x30 and "9" is 0x39.
-        let characters = Array.from(data);
+        const characters = Array.from(data);
         const digits = characters.map((c) => c.charCodeAt(0) & 0xf);
         console.log("digits:", digits);
         // Pack data bitstream. Segments begin with most significant bit
@@ -104,69 +108,78 @@ class QRCode {
         //    First pack each full of 3 digits (range 000..999) as 10 bits.
         //    If 2 digits are left over (range 00..99), pack them as 7 bits.
         //    If only 1 digit is left over (range 0..9), pack it as 4 bits.
-        const trigrams = Math.floor(digits.length / 3);
-        for(let i=0; i<trigrams*3; i+=3) {
-            let n = (digits[i]*100) + (digits[i+1]*10) + digits[i+2];
-            QRCode.appendAsBits(stream, n, 10);
-        }
-        const digitsRemainder = digits.length % 3;
-        if(digitsRemainder == 2) {             // Last 2 digits as 7 bits
-            const i = digits.length - 2;
-            const n = (digits[i]*10) + digits[i+1];
-            QRCode.appendAsBits(stream, n, 7);
-        } else if(digitsRemainder == 1) {      // Final digit as 4 bits
-            const i = digits.length - 1;
-            QRCode.appendAsBits(stream, digits[i], 4);
+        {
+            const trigrams = Math.floor(digits.length / 3);
+            for(let i=0; i<trigrams*3; i+=3) {
+                let n = (digits[i]*100) + (digits[i+1]*10) + digits[i+2];
+                QRCode.appendAsBits(stream, n, 10);
+            }
+            const digitsRemainder = digits.length % 3;
+            if(digitsRemainder == 2) {             // Last 2 digits as 7 bits
+                const i = digits.length - 2;
+                const n = (digits[i]*10) + digits[i+1];
+                QRCode.appendAsBits(stream, n, 7);
+            } else if(digitsRemainder == 1) {      // Final digit as 4 bits
+                const i = digits.length - 1;
+                QRCode.appendAsBits(stream, digits[i], 4);
+            }
         }
         // 4. Pack Terminator sequence (0b0000, 4 bits, or abbreviate to fit)
-        const untermLen = stream.length;
-        const availableBits = QRCode.maxDataBits - untermLen;
-        if(availableBits > 0) {
-            if (availableBits < 4) {
-                QRCode.appendAsBits(stream, 0b0000, availableBits);
-            } else {
-                QRCode.appendAsBits(stream, 0b0000, 4);
+        {
+            const untermLen = stream.length;
+            const availableBits = QRCode.maxDataBits - untermLen;
+            if(availableBits > 0) {
+                if (availableBits < 4) {
+                    QRCode.appendAsBits(stream, 0b0000, availableBits);
+                } else {
+                    QRCode.appendAsBits(stream, 0b0000, 4);
+                }
             }
         }
         // 5. Pad data bit stream with minimum number of 0's that will give a
         //    stream length that is a multiple of 8 bits
-        const unpaddedBitsLen = stream.length;
-        console.log("unpaddedBitsLen:", unpaddedBitsLen);
-        const extraBits = unpaddedBitsLen % 8;
-        if(extraBits > 0) {
-            QRCode.appendAsBits(stream, 0, 8-extraBits);
+        {
+            const unpaddedBitsLen = stream.length;
+            const extraBits = unpaddedBitsLen % 8;
+            if(extraBits > 0) {
+                QRCode.appendAsBits(stream, 0, 8-extraBits);
+            }
+            console.log("unpaddedBitsLen:", unpaddedBitsLen);
+            console.log("paddedBits:", stream);
         }
-        console.log("stream:", stream);
-        console.log("stream.length:", stream.length);
         // 6. Convert bit stream to codewords
-        const paddedBitsLen = stream.length;
-        const unpaddedCWLen = Math.floor(paddedBitsLen / 8);
-        console.log("paddedBitsLen:", paddedBitsLen);
-        console.log("unpaddedCWLen:", unpaddedCWLen);
         let codewords = new Array();
-        for(let i=0; i<unpaddedCWLen; i++) {
-            let bits = stream.slice(i*8, (i+1)*8);
-            const initialVal = 0;
-            let n = bits.reduce((acc, curr) => (acc*2) + curr, initialVal);
-            codewords.push(n);
+        {
+            const paddedBitsLen = stream.length;
+            const unpaddedCWLen = Math.floor(paddedBitsLen / 8);
+            for(let i=0; i<unpaddedCWLen; i++) {
+                let bits = stream.slice(i*8, (i+1)*8);
+                const initialVal = 0;
+                let n = bits.reduce((acc, curr) => (acc*2) + curr, initialVal);
+                codewords.push(n);
+            }
+            console.log("paddedBitsLen:", paddedBitsLen);
+            console.log("unpaddedCWLen:", unpaddedCWLen);
+            console.log("codewords:", codewords);
+            console.log("codewords.length:", codewords.length);
         }
-        console.log("codewords:", codewords);
-        console.log("codewords.length:", codewords.length);
         // 7. Add alternating Pad codewords to reach the full data codeword
         //    capacity of this symbol version
-        const padCWNeeded = QRCode.dataCodewords - codewords.length;
-        const padCWDiv2 = padCWNeeded >> 1;
-        const alternatingPad1 = 0b11101100;
-        const alternatingPad2 = 0b00010001;
-        for(let i=0; i<(padCWNeeded>>1); i++) { // Divisible by 2 padding
-            codewords.push(alternatingPad1);
-            codewords.push(alternatingPad2);
+        {
+            const padCWNeeded = QRCode.dataCodewords - codewords.length;
+            const padCWDiv2 = padCWNeeded >> 1;
+            const alternatingPad1 = 0b11101100;
+            const alternatingPad2 = 0b00010001;
+            for(let i=0; i<(padCWNeeded>>1); i++) { // Divisible by 2 padding
+                codewords.push(alternatingPad1);
+                codewords.push(alternatingPad2);
+            }
+            if((padCWNeeded & 1) == 1) {            // Remainder %2 padding
+                codewords.push(alternatingPad1);
+            }
+            console.log("padded codewords:", codewords);
+            console.log("padded codewords.length:", codewords.length);
         }
-        if((padCWNeeded & 1) == 1) {            // Remainder %2 padding
-            codewords.push(alternatingPad1);
-        }
-        console.log("padded codewords:", codewords);
-        console.log("padded codewords.length:", codewords.length);
 
         // TODO: finish this (EC codewords, etc)
     }
@@ -213,24 +226,8 @@ class QRCode {
         this.drawFinderPattern(ctx, q, q + offset);
         // Clock rows
         this.drawClockRows(ctx);
-        // TODO:
-        // 1. Encode data:
-        //    - Make bit stream: Mode Indicator, Data Sequence, Terminator
-        //    - Split bit stream into 8-bit codewords
-        //    - Add Pad characters to fill codewords for version
-        // 2. Encode error correction:
-        //    - Divide codewords into blocks
-        //    - Generate EC codewords for blocks
-        //    - Append EC codewords to data codewords
-        // 3. Form message
-        //    - Interleave data and EC codewords
-        //    - Add remainder bits if needed
-        //    - Place codeword modules into matrix
-        // 4. Masking
-        //    - Measure symbol quality for each mask pattern
-        //    - Pick best mask pattern
-        // 5. Format version info
-        //    - Version, Mask, EC Level
+
+        // TODO: Finish this
     }
 }
 
