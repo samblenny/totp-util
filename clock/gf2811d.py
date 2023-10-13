@@ -97,7 +97,7 @@ class ReedSolomon:
             raise Exception(e)
         # Create dividend array with data + zeros for the ECC bytes
         m = data + ([0] * self.ecc_len)
-        # Divide m by the generator polynomial to get ECC bytes (the quotient)
+        # Divide m by the generator polynomial to get ECC bytes (the remainder)
         for i in range(dl):
             # Leading coefficient of generator polynomial g(x) is always 1, so
             # each iteration, we subtract (xor) m[i]*g(x)*x^(n-i) from m
@@ -109,7 +109,7 @@ class ReedSolomon:
                 # some work by inlining mul(a, b) = exp(log(a) + log(b)).
                 # Remember that log(leading coefficient) = 0.
                 m[i+j] ^= self.gf.exp(log_a + g_coeff)
-        # Now that the ECC quotient has been computed, copy the data bytes back
+        # Now that the ECC remainder has been computed, copy the data bytes back
         # over the front of the array to form a complete message
         for (i, x) in enumerate(data):
             m[i] = x
