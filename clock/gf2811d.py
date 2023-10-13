@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """
-Experiment with Galois Field GF(2^8) logarithmic multiplier
+Experiment with arithemetic in Galois Field GF(2^8), prime polynomial 0x11d
 """
 
 class GF2811d:
@@ -17,8 +17,11 @@ class GF2811d:
             self.log_lut[n] = i
 
     def log(self, x):
-        """Logarithm for domain 1..255"""
-        if (x < 1) or (x > 255):
+        """Logarithm for domain 0..255 with log(0) = 0.
+        Defining log(0) = 0 lets calling code be simpler by avoiding the need
+        for conditional logic to handle 0 as a special case.
+        """
+        if (x < 0) or (x > 255):
             raise Exception(f"x={x} is out of range for log(x)")
         return self.log_lut[x]
 
@@ -28,7 +31,7 @@ class GF2811d:
             raise Exception(f"x={x} is out of range for exp(x)")
         return self.exp_lut[(x & 255) + ((x>>8)&1)]
 
-    def log_mul(self, x, y):
+    def mul(self, x, y):
         """Multiply using logarithms"""
         if (x == 0) or (y == 0):
             return 0
@@ -42,6 +45,75 @@ class GF2811d:
         for i in range(7,-1,-1):
             n ^= ((n>>(8+i))&1) * (0x11d << i)
         return n
+
+
+class ReedSolomon:
+    """
+    Implement Reed-Solomon encoder using GF(2^8), 𝛼=2, prime polynomial 0x11d,
+    and generator polynomials from Table A.1 of ISO/IEC 18004:2015 Annex A.
+    """
+
+    def __init__(self, version):
+        """
+        Initialize encoder for QR Code version 1 with 26 total codewords. The
+        codewords are split between data and error correction according to the
+        L, M, Q, and H error correction levels. The generator polynomial
+        coefficients are exponents (the base 𝛼=2 log over GF(2^8) of the
+        actual coefficients) to match Table A.1 of ISO/IEC 18004:2005. The
+        coefficients of the highest order terms are always 1 (𝛼^0=1), so they
+        are are omitted.
+        """
+        if version == "1-L":
+            self.ecc_len = 7
+            self.gen_poly = [0, 87, 229, 146, 149, 238, 102, 21]
+        elif version == "1-M":
+            self.ecc_len = 10
+            self.gen_poly = [0, 251, 67, 46, 61, 118, 70, 64, 94, 32, 45]
+        elif version == "1-Q":
+            self.ecc_len = 13
+            self.gen_poly = [0, 74, 152, 176, 100, 86, 100, 106, 104, 130, 218,
+                206, 140, 78]
+        elif version == "1-H":
+            self.ecc_len = 17
+            self.gen_poly = [0, 43, 139, 206, 78, 43, 239, 123, 206, 214, 147,
+                24, 99, 150, 39, 243, 163, 136]
+        else:
+            raise Exception(f"version \"{version}\" is not supported")
+        self.gf = GF2811d()
+        self.v = version
+        self.d_len = 26 - self.ecc_len  # Version 1 total bytes = 26
+        if self.d_len + self.ecc_len != 26:
+            raise Exception("d_len does not match ecc_len")
+
+    def encode(self, data):
+        """
+        Encode data as a Reed-Solomon message. Data should be the exact length
+        of codewords for the selected QR code version and ECC level. Returned
+        array will be data + ecc codewords.
+        """
+        dl = len(data)
+        if self.d_len != dl:
+            e = f"{self.v} needs {self.d_len} data bytes, got {dl}"
+            raise Exception(e)
+        # Create dividend array with data + zeros for the ECC bytes
+        m = data + ([0] * self.ecc_len)
+        # Divide m by the generator polynomial to get ECC bytes (the quotient)
+        for i in range(dl):
+            # Leading coefficient of generator polynomial g(x) is always 1, so
+            # each iteration, we subtract (xor) m[i]*g(x)*x^(n-i) from m
+            log_a = self.gf.log(m[i])
+            if log_a == 0:
+                continue
+            for (j, g_coeff) in enumerate(self.gen_poly):
+                # Since g(x) coefficients are already in log form, we can save
+                # some work by inlining mul(a, b) = exp(log(a) + log(b)).
+                # Remember that log(leading coefficient) = 0.
+                m[i+j] ^= self.gf.exp(log_a + g_coeff)
+        # Now that the ECC quotient has been computed, copy the data bytes back
+        # over the front of the array to form a complete message
+        for (i, x) in enumerate(data):
+            m[i] = x
+        return m
 
 
 if __name__ == "__main__":
@@ -101,10 +173,10 @@ if __name__ == "__main__":
 
         def test_log(self):
             gf = GF2811d()
-            x_values = [1, 2, 3, 4, 253, 254, 255]
+            x_values = [0, 1, 2, 3, 4, 253, 254, 255]
             y_values = [gf.log(x) for x in x_values]
-            self.assertEqual(y_values, [255, 1, 25, 2, 80, 88, 175])
-            for x in [0, 256]:
+            self.assertEqual(y_values, [0, 255, 1, 25, 2, 80, 88, 175])
+            for x in [-1, 256]:
                 self.assertRaises(Exception, gf.log, x)
 
         def test_mul_implementations_agree(self):
@@ -112,15 +184,60 @@ if __name__ == "__main__":
             gf = GF2811d()
             for a in range(256):
                 for b in range(a,256):
-                    self.assertEqual(gf.hw_mul(a, b), gf.log_mul(a, b))
+                    self.assertEqual(gf.hw_mul(a, b), gf.mul(a, b))
             wanted = [0, 0, 0]
-            got = [gf.log_mul(0, x) for x in [0, 5, 99]]
+            got = [gf.mul(0, x) for x in [0, 5, 99]]
             self.assertEqual(wanted, got)
             pairs = [(2, 5), (3, 3), (3, 7), (5, 5)]
             wanted = [10, 5, 9, 17]
-            got = [gf.log_mul(a, b) for (a, b) in pairs]
+            got = [gf.mul(a, b) for (a, b) in pairs]
             self.assertEqual(wanted, got)
 
 
+    class TestReedSolomon(unittest.TestCase):
+        def test_init(self):
+            with self.assertRaises(Exception):
+                rs = ReedSolomon("2-Q")
+            rs = ReedSolomon("1-L")
+            self.assertEqual(rs.ecc_len, 7)
+            self.assertEqual(rs.ecc_len, len(rs.gen_poly)-1)
+            self.assertEqual(rs.d_len, 19)
+            rs = ReedSolomon("1-M")
+            self.assertEqual(rs.ecc_len, 10)
+            self.assertEqual(rs.ecc_len, len(rs.gen_poly)-1)
+            self.assertEqual(rs.d_len, 16)
+            rs = ReedSolomon("1-Q")
+            self.assertEqual(rs.ecc_len, 13)
+            self.assertEqual(rs.ecc_len, len(rs.gen_poly)-1)
+            self.assertEqual(rs.d_len, 13)
+            rs = ReedSolomon("1-H")
+            self.assertEqual(rs.ecc_len, 17)
+            self.assertEqual(rs.ecc_len, len(rs.gen_poly)-1)
+            self.assertEqual(rs.d_len, 9)
+
+        def test_encode_1L(self):
+            rs = ReedSolomon("1-L")
+            # Convert bytes to list of bytes
+            msg = "this is a message__"
+            data = [b for b in msg.encode()]  # Convert bytes to list of bytes
+            encoded = rs.encode(data)
+            enc_data = encoded[:len(data)]
+            enc_ecc = encoded[len(data):]
+            self.assertEqual(enc_data, data)
+            self.assertEqual(enc_ecc, [102, 171, 195, 197, 71, 73, 243])
+
+        def test_encode_1H(self):
+            rs = ReedSolomon("1-H")
+            msg = "short msg"
+            data = [b for b in msg.encode()]  # Convert bytes to list of bytes
+            encoded = rs.encode(data)
+            enc_data = encoded[:len(data)]
+            enc_ecc = encoded[len(data):]
+            self.assertEqual(enc_data, data)
+            self.assertEqual(enc_ecc, [186, 198, 18, 201, 195, 189, 127, 28,
+                146, 122, 203, 121, 139, 46, 52, 177, 235])
+
+
     print("Testing exp and log for GF(2^8), 𝛼=2, prime polynomial=0x11d")
+    print("Testing Reed-Solomon encoding")
     unittest.main()
