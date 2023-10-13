@@ -4,7 +4,7 @@ Experiment with Galois Field GF(2^8) logarithmic multiplier
 """
 
 class GF2811d:
-    """Galois Field GF(2^8), base 𝛼=2, prime polynomial=0x11d"""
+    """Galois Field GF(2^8), generator 𝛼=2, prime polynomial=0x11d"""
 
     def __init__(self):
         """Compute logarithm and exponential tables"""
@@ -18,10 +18,14 @@ class GF2811d:
 
     def log(self, x):
         """Logarithm for domain 1..255"""
+        if (x < 1) or (x > 255):
+            raise Exception(f"x={x} is out of range for log(x)")
         return self.log_lut[x]
 
     def exp(self, x):
         """Exponential for domain 0..510 to allow for exp(log(a) + log(b))"""
+        if (x < 0) or (x > 510):
+            raise Exception(f"x={x} is out of range for exp(x)")
         return self.exp_lut[(x & 255) + ((x>>8)&1)]
 
     def log_mul(self, x, y):
@@ -92,12 +96,16 @@ if __name__ == "__main__":
             x_values = [0, 1, 2, 3, 254, 255, 256, 257, 258, 509, 510]
             y_values = [gf.exp(x) for x in x_values]
             self.assertEqual(y_values, [1, 2, 4, 8, 142, 1, 2, 4, 8, 142, 1])
+            for x in [-1, 511]:
+                self.assertRaises(Exception, gf.exp, x)
 
         def test_log(self):
             gf = GF2811d()
             x_values = [1, 2, 3, 4, 253, 254, 255]
             y_values = [gf.log(x) for x in x_values]
             self.assertEqual(y_values, [255, 1, 25, 2, 80, 88, 175])
+            for x in [0, 256]:
+                self.assertRaises(Exception, gf.log, x)
 
         def test_mul_implementations_agree(self):
             """Log multiply and hardware-gate-style multiply should agree"""
