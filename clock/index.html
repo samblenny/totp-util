@@ -47,20 +47,82 @@ let shellP   = document.querySelector("#shell");
 let qrCanvas = document.querySelector("#qrCanvas");
 let qrCtx    = qrCanvas.getContext("2d");
 
+// Reed-Solomon encoder using the Galois Field GF(2^8), generator 𝛼=2, prime
+// polynomial 0x11d, and generator polynomial from ISO/IEC 18004:2015 Annex A.
+class ReedSolomon {
+    // Initialize logarithm tables for doing multiplication over GF(2^8)
+    static GF2811D = (() => {
+        let log_lut = new Array(256).fill(0);
+        let exp_lut = new Array(256).fill(1);
+        var n = 1;
+        for (let i=1; i<256; i++) {
+            n = (n << 1) ^ (((n>>7) & 1) * 0x11d); // Multiply n by 𝛼=2 mod 11d
+            exp_lut[i] = n;
+            log_lut[n] = i;
+        }
+        return {log_lut: log_lut, exp_lut: exp_lut};
+    })();
+
+    // Logarithm for domain 0..255 with special case log(0) defined as 0
+    log(x) {
+        return ReedSolomon.GF2811D.log_lut[x];
+    }
+
+    // Exponential for domain 0..510 to allow for exp(log(a) + log(b))
+    exp(x) {
+        return ReedSolomon.GF2811D.exp_lut[(x & 255) + ((x>>8)&1)];
+    }
+
+    /*
+    Encode Reed-Solomon ECC remainder for QR Code version 1-M data. Generator
+    polynomial coefficients are in logarithm form (exponents of base 𝛼=2 over
+    GF(2^8)) to match Table A.1 of ISO/IEC 18004:2005.
+
+    Notes on dividing message m (data + ecc) by generator polynomial g(x):
+    1. Leading coefficient of g(x) is always 1 (0 in log form), so each
+       iteration, we subtract (xor) m[i]*g(x)*x^(n-i) from m
+    2. Since g(x) coefficients are already in log form, we can inline and
+       simplify the multiplication m[i]*g(x) = exp(log(m[i]) + log(g(x)))
+    */
+    eccRemainder(data) {
+        const version = "1-M";
+        const eccBytes = 10;
+        const dataBytes = 16;
+        const generatorPoly = [0, 251, 67, 46, 61, 118, 70, 64, 94, 32, 45];
+        if (data.length != dataBytes) {
+            e = `${version} needs ${dataBytes} data bytes, got ${data.length}`;
+            throw new Error(e);
+        }
+        // Create dividend polynomial of data + ([0] * eccBytes)
+        var m = data.concat(new Array(eccBytes).fill(0));
+        // Divide by generator polynomial
+        for (let i=0; i<data.length; i++) {
+            let log_m = this.log(m[i]);
+            if (log_m == 0) {
+                continue;
+            }
+            for (let j=0; j<generatorPoly.length; j++) {
+                let logCoefficient = generatorPoly[j];
+                m[i+j] ^= this.exp(log_m + logCoefficient);
+            }
+        }
+        // Return the ECC remainder bytes
+        return m.slice(dataBytes);
+    }
+}
+
 class QRCode {
     static oneshotArmed = true; // TODO: remove this
 
     static numericRE = /^[0-9]+$/; // Regular expression for numeric data
-    static pxPerModule = 5;   // Size of QR code module in pixels
-    static quiet = 4;         // Width of quiet zone in modules
-    static version = 1;       // Fits 14 digits (MMDDHHMMCCYYss)
-    static ecc = "H";         // Error correction level
-    static maxDigits = 17;    // Version 1-H fits up to 17 digits
-    static dataBits = 72;     // Version 1-H number of data bits
-    static dataCodewords = 9; // Version 1-H number of codewords
-    static ecCodewords = 17;  // Ver 1-H number of error correction codewords
-    static ecPVal = 1;        // Ver 1-H value of error correction p
-    static ecBlocks = 1;      // Ver 1-H number of error correction blocks
+    static pxPerModule = 5;    // Size of QR code module in pixels
+    static quiet = 4;          // Width of quiet zone in modules
+    static version = 1;        // Fits 14 digits (MMDDHHMMCCYYss)
+    static ecc = "M";          // Error correction level
+    static maxDigits = 34;     // Version 1-M numeric digit capacity
+    static dataBits = 128;     // Version 1-M number of data bits
+    static dataCodewords = 16; // Version 1-M number of codewords
+    static ecCodewords = 10;   // Ver 1-M number of error correction codewords
 
     // Convert integer to bit array (MSB first) and append to bitstream.
     // For example n=5, numBits=4 would append [0,1,0,1] to stream.
@@ -180,8 +242,16 @@ class QRCode {
             console.log("padded codewords:", codewords);
             console.log("padded codewords.length:", codewords.length);
         }
+        // 8. Generate Error Correction (ECC) codewords
+        let eccCodewords = new Array();
+        {
+            let rs = new ReedSolomon();
+            eccCodewords = rs.eccRemainder(codewords);
+            console.log("eccCodewords:", eccCodewords);
+            console.log("eccCodewords.length:", eccCodewords.length);
+        }
 
-        // TODO: finish this (EC codewords, etc)
+        // TODO: finish this
     }
 
     // Draw QR code 1:1:3:1:1 finder pattern with top-left coordinate (x,y).
