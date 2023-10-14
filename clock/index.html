@@ -111,6 +111,162 @@ class ReedSolomon {
     }
 }
 
+// PxMatrix provides a staging area for turning data and ECC codewords into
+// pixels by way of xor with one of the QR code mask patterns. Note that in
+// barcode lingo, "modules" refers to a concept that's close to, but not quite
+// the same as, the meaning of "pixels" in the context of computer graphics,
+// For the most part, comments here use both terms interchangeably.
+class PxMatrix {
+    static width = 21;   // V1 QR code is 21 modules wide (29 with quiet zone)
+    static height = 21;  // V1 QR code is 21 modules high
+    static layout = (() => {
+        // Layout of modules (pixels) within a version 1 QR code. This is based
+        // on ISO/IEC 18004:2015 §6.3.2.1 Figure 5, "Version 1 and 2 symbols"
+        // and §7.7.3 "Symbol Character Placement".
+        const up = 0;
+        const dn = 1;
+        const upSplit = 2;
+        const dnSplit = 3;
+        const floorplan = [
+            // MSB-x, MSB-y, direction  // codeword index
+            20, 20, up,       //  0  Below top-right finder pattern
+            20, 16, up,       //  1
+            20, 12, up,       //  2
+            18,  9, dn,       //  3
+            18, 13, dn,       //  4
+            18, 17, dn,       //  5
+            16, 20, up,       //  6
+            16, 16, up,       //  7
+            16, 12, up,       //  8
+            14,  9, dn,       //  9
+            14, 13, dn,       // 10
+            14, 17, dn,       // 11
+            12, 20, up,       // 12  First full height column
+            12, 16, up,       // 13
+            12, 12, up,       // 14
+            12,  8, upSplit,  // 15  Spans horizontal timing pattern
+            12,  3, up,       // 16
+            10,  0, dn,       // 17
+            10,  4, dnSplit,  // 18  Spans horizontal timing pattern
+            10,  9, dn,       // 19
+            10, 13, dn,       // 20
+            10, 17, dn,       // 21
+             8, 12, up,       // 22  Right of vertical timing pattern
+             5,  9, dn,       // 23  Between left finder patterns
+             3, 12, up,       // 24
+             1,  9, dn,       // 25
+        ];
+        return {
+            up: up,
+            dn: dn,
+            upSplit: upSplit,
+            dnSplit: dnSplit,
+            floorplan: floorplan,
+        };
+    })();
+
+    constructor() {
+        // Since Version 1 codes are only 21 modules wide, we can store each
+        // row of modules as a Uint32
+        this.buf = new Uint32Array(PxMatrix.height).fill(0);
+    }
+
+    setPx(x, y) {
+        if (x < 0 || PxMatrix.width <= x || y < 0 || PxMatrix.height <= y) {
+            throw new Error(`(${x}, ${y}) out of range`);
+        }
+        this.buf[y] |= 1 << x;
+    }
+
+    getPx(x, y) {
+        if (x < 0 || PxMatrix.width <= x || y < 0 || PxMatrix.height <= y) {
+            throw new Error(`(${x}, ${y}) out of range`);
+        }
+        return (this.buf[y] >> x) & 1;
+    }
+
+    /*
+    Draw a QR code character symbol: Most significant codeword bit goes at
+    (x,y) and subsequent bits fill the character in one of 4 different
+    shapes according to the direction argument (up, dn, upSplit, dnSplit).
+
+    QR code character symbol bit layout (see ISO 18004:2015 §7.7.3):
+    upward:  0 1 △  downward: 6 7 |
+             2 3 |            4 5 |
+             4 5 |            2 3 |
+             6 7 |            0 1 ▽
+    Note that two of the character symbols span the vertical timing pattern.
+    */
+    drawCodeword(x, y, direction, codeword) {
+        // Determine which shape is indicated by the direction argument and
+        // check for mal-formed arguments that might indicate coding errors.
+        if (![20, 18, 16, 14, 12, 10, 8, 5, 3, 1].includes(x)) {
+            throw new Error(`unexpected x value: ${x}`);
+        }
+        const layout = PxMatrix.layout;
+        let x_list = [x, x-1, x, x-1, x, x-1, x, x-1];
+        let y_list;
+        if (layout.up == direction) {
+            if (![20, 16, 12, 3].includes(y)) {
+                throw new Error(`unexpected y value for up: ${y}`);
+            }
+            y_list = [y, y, y-1, y-1, y-2, y-2, y-3, y-3];
+        } else if(layout.upSplit == direction) {
+            if ((8 != y) || (x != 12)) {
+                throw new Error(`unexpected (x,y) for upSplit: (${x},${y})`);
+            }
+            y_list = [y, y, y-1, y-1, y-3, y-3, y-4, y-4];
+        } else if(layout.dn == direction) {
+            if (![0, 9, 13, 17].includes(y)) {
+                throw new Error(`unexpected y value for dn: ${y}`);
+            }
+            y_list = [y, y, y+1, y+1, y+2, y+2, y+3, y+3];
+        } else if(layout.dnSplit == direction) {
+            if ((4 != y) || (x != 10)) {
+                throw new Error(`unexpected (x,y) for dnSplit: (${x},${y})`);
+            }
+            y_list = [y, y, y+1, y+1, y+3, y+3, y+4, y+4];
+        } else {
+            throw new Error(`unknown layout direction: ${direction}`);
+        }
+        // Set pixels according to codeword bits in shape of (x_list, y_list)
+        for (let i=0; i<8; i++) {
+            let bit = (codeword >> (7-i)) & 1;
+            if (bit != 0) {
+                this.setPx(x_list[i], y_list[i]);
+            }
+        }
+    }
+
+    placeCharacters(codewords) {
+        const layout = PxMatrix.layout;
+        const floorplan = PxMatrix.layout.floorplan;
+        if ((codewords.length * 3) != floorplan.length) {
+            throw new Error(`unexpected codewords length ${codewords.length}`);
+        }
+        for (let i=0; i<codewords.length; i++) {
+            const offset = i * 3;
+            const x = floorplan[offset];
+            const y = floorplan[offset+1];
+            const direction = floorplan[offset+2];
+            this.drawCodeword(x, y, direction, codewords[i]);
+        }
+    }
+}
+
+function debug(...variadicArgs) {
+    if (!QRCode.oneshotArmed) {
+        return;
+    }
+    if (variadicArgs.length == 1) {
+        console.log(variadicArgs[0]);
+    } else if (variadicArgs.length == 2) {
+        console.log(variadicArgs[0], variadicArgs[1]);
+    } else {
+        console.log(variadicArgs);
+    }
+};
+
 class QRCode {
     static oneshotArmed = true; // TODO: remove this
 
@@ -134,14 +290,6 @@ class QRCode {
 
     // Encode data as a numeric mode QR code bitstream
     constructor(data) {
-        // TODO: remove the oneshot bypass mechanism. It exists to prevent huge
-        // console.log debug spew as I work on implementing the QR code spec.
-        if(!QRCode.oneshotArmed) {
-            return;
-        } else {
-            QRCode.oneshotArmed = false;
-            console.log("oneshot logger enable is now off");
-        }
         // Check that data can be encoded as version 1-H numeric QR code
         {
             if(!data.match(QRCode.numericRE)) {
@@ -159,7 +307,7 @@ class QRCode {
         // equivalent decimal integers. Note that "0" is 0x30 and "9" is 0x39.
         const characters = Array.from(data);
         const digits = characters.map((c) => c.charCodeAt(0) & 0xf);
-        console.log("digits:", digits);
+        debug("digits:", digits);
         // Pack data bitstream. Segments begin with most significant bit
         // 1. Numeric mode indicator (0b0001, 4 bits, MSB first)
         let stream = new Array();
@@ -206,8 +354,7 @@ class QRCode {
             if(extraBits > 0) {
                 QRCode.appendAsBits(stream, 0, 8-extraBits);
             }
-            console.log("unpaddedBitsLen:", unpaddedBitsLen);
-            console.log("paddedBits:", stream);
+            debug("paddedBits:", stream);
         }
         // 6. Convert bit stream to codewords
         let codewords = new Array();
@@ -220,10 +367,8 @@ class QRCode {
                 let n = bits.reduce((acc, curr) => (acc*2) + curr, initialVal);
                 codewords.push(n);
             }
-            console.log("paddedBitsLen:", paddedBitsLen);
-            console.log("unpaddedCWLen:", unpaddedCWLen);
-            console.log("codewords:", codewords);
-            console.log("codewords.length:", codewords.length);
+            debug("unpaddedCWLen:", unpaddedCWLen);
+            debug("codewords:", codewords);
         }
         // 7. Add alternating Pad codewords to reach the full data codeword
         //    capacity of this symbol version
@@ -239,19 +384,42 @@ class QRCode {
             if((padCWNeeded & 1) == 1) {            // Remainder %2 padding
                 codewords.push(alternatingPad1);
             }
-            console.log("padded codewords:", codewords);
-            console.log("padded codewords.length:", codewords.length);
+            debug("padded codewords:", codewords);
         }
         // 8. Generate Error Correction (ECC) codewords
         let eccCodewords = new Array();
         {
             let rs = new ReedSolomon();
             eccCodewords = rs.eccRemainder(codewords);
-            console.log("eccCodewords:", eccCodewords);
-            console.log("eccCodewords.length:", eccCodewords.length);
+            debug("eccCodewords:", eccCodewords);
         }
-
+        // 9. Place the character symbols for the codewords as unmasked pixels
+        this.pxMatrix = new PxMatrix();
+        {
+            this.pxMatrix.placeCharacters(codewords.concat(eccCodewords));
+        }
         // TODO: finish this
+
+        // TODO: remove the oneshot bypass mechanism. It exists to prevent huge
+        // console.log debug spew as I work on implementing the QR code spec.
+        if(QRCode.oneshotArmed) {
+            QRCode.oneshotArmed = false;
+            console.log("oneshot logger enable is now off");
+        }
+    }
+
+    drawCharacters(ctx) {
+        const p = QRCode.pxPerModule;
+        let x0 = QRCode.quiet * p;
+        let y0 = QRCode.quiet * p;
+        for (let x=0; x<PxMatrix.width; x++) {
+            for (let y=0; y<PxMatrix.height; y++) {
+                let bit = this.pxMatrix.getPx(x, y);
+                if (bit != 0) {
+                    ctx.fillRect(x0+(x*p), y0+(y*p), p, p);
+                }
+            }
+        }
     }
 
     // Draw QR code 1:1:3:1:1 finder pattern with top-left coordinate (x,y).
@@ -296,6 +464,7 @@ class QRCode {
         this.drawFinderPattern(ctx, q, q + offset);
         // Clock rows
         this.drawClockRows(ctx);
+        this.drawCharacters(ctx);
 
         // TODO: Finish this
     }
