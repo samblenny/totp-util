@@ -204,25 +204,33 @@ class PxMatrix {
          0x000000, 0x000e00, 0x001c00, 0x0aaaaa, 0x1c7187, 0x18e38e,
          0x155515, 0x038e00, 0x071c00, 0x0aaa00, 0x1c7000, 0x18e200,
          0x155400, 0x038e00, 0x071c00, ];
+    static finderTimingMask = [
+        0x1fc07f, 0x104041, 0x17405d, 0x17405d, 0x17405d, 0x104041,
+        0x1fd57f, 0x000000, 0x000040, 0x000000, 0x000040, 0x000000,
+        0x000040, 0x000000, 0x00007f, 0x000041, 0x00005d, 0x00005d,
+        0x00005d, 0x000041, 0x00007f, ];
 
     constructor() {
         // Since Version 1 codes are only 21 modules wide, we can store each
         // row of modules as a Uint32. Since there are 8 mask patterns that
         // need to be considered, each row gets 8 Uint32's, one for each mask
-        // pattern.
+        // pattern. Since the penalty scoring rules for masked characters are
+        // supposed to include the finder patterns and timing patterns, those
+        // get OR'ed in now too to save some work later.
         const masksPerRow = 8;
         this.buf = new Uint32Array(PxMatrix.height * masksPerRow);
         for (let y=0; y<PxMatrix.height; y++) {
             // Initialize the buffer rows with copies of the mask patterns
+            const finder = PxMatrix.finderTimingMask[y];
             let y0 = y * masksPerRow;
-            this.buf[y0+0] = PxMatrix.mask0[y];
-            this.buf[y0+1] = PxMatrix.mask1[y];
-            this.buf[y0+2] = PxMatrix.mask2[y];
-            this.buf[y0+3] = PxMatrix.mask3[y];
-            this.buf[y0+4] = PxMatrix.mask4[y];
-            this.buf[y0+5] = PxMatrix.mask5[y];
-            this.buf[y0+6] = PxMatrix.mask6[y];
-            this.buf[y0+7] = PxMatrix.mask7[y];
+            this.buf[y0+0] = PxMatrix.mask0[y] | finder;
+            this.buf[y0+1] = PxMatrix.mask1[y] | finder;
+            this.buf[y0+2] = PxMatrix.mask2[y] | finder;
+            this.buf[y0+3] = PxMatrix.mask3[y] | finder;
+            this.buf[y0+4] = PxMatrix.mask4[y] | finder;
+            this.buf[y0+5] = PxMatrix.mask5[y] | finder;
+            this.buf[y0+6] = PxMatrix.mask6[y] | finder;
+            this.buf[y0+7] = PxMatrix.mask7[y] | finder;
         }
     }
 
@@ -242,6 +250,11 @@ class PxMatrix {
         this.buf[y0+5] ^= bit;
         this.buf[y0+6] ^= bit;
         this.buf[y0+7] ^= bit;
+    }
+
+    // Calculate the penalty score for each mask pattern according to the rules
+    // given in ISO/IEC 18004:2015 §7.8.3.1 "Evaluation of QR Code symbols"
+    calculatePenalties() {
     }
 
     // Get the requested pixel for the requested mask pattern
@@ -309,6 +322,7 @@ class PxMatrix {
         }
     }
 
+    // Translate list of codewords into shapes in the matrix of pixels
     placeCharacters(codewords) {
         const layout = PxMatrix.layout;
         const floorplan = PxMatrix.layout.floorplan;
@@ -479,11 +493,20 @@ class QRCode {
         }
     }
 
-    drawCharacters(ctx) {
+    // Draw QR code to ctx, the 2d context of a canvas element
+    draw(ctx) {
+        // TODO: change this to the mask with the lowest penalty score
         const mask = 7;
+
+        // Clear canvas to white
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, ctx.width, ctx.height);
+        // Prepare to draw QR code modules (pixels) as black rectangles
+        ctx.fillStyle = "black";
         const p = QRCode.pxPerModule;
         let x0 = QRCode.quiet * p;
         let y0 = QRCode.quiet * p;
+        // Draw the pixels from the pxMatrix
         for (let x=0; x<PxMatrix.width; x++) {
             for (let y=0; y<PxMatrix.height; y++) {
                 let bit = this.pxMatrix.getPx(x, y, mask);
@@ -492,53 +515,6 @@ class QRCode {
                 }
             }
         }
-    }
-
-    // Draw QR code 1:1:3:1:1 finder pattern with top-left coordinate (x,y).
-    // Caller must set strokeStyle="black" and fillStyle="black".
-    drawFinderPattern(ctx, x, y) {
-        const p = QRCode.pxPerModule;
-        const half = p*0.5;
-        let side = (7*p)-p;
-        ctx.strokeRect((x*p)+half, (y*p)+half, side, side);
-        side = 3*p;
-        ctx.fillRect((x+2)*p, (y+2)*p, side, side);
-    }
-
-    // Draw clock rows between bottom edge of the two top finder patterns and
-    // the right edges of the two leftmost finder patterns.
-    drawClockRows(ctx) {
-        const p = QRCode.pxPerModule;
-        const count = 1 + (2 * QRCode.version);
-        // Calculate (x,y) for horizontal row, swap coords for vertical row
-        let x0 = QRCode.quiet + 8;
-        let y = (QRCode.quiet + 6) * p;
-        for(let n=0; n<count; n++) {
-            let x = (x0 + (n*2)) * p;
-            ctx.fillRect(x, y, p, p); // Horizontal row
-            ctx.fillRect(y, x, p, p); // Vertical row (swapped x,y)
-        }
-    }
-
-    // Draw QR code to ctx, the 2d context of a canvas element
-    draw(ctx) {
-        // Clear canvas
-        ctx.fillStyle = "white";
-        ctx.fillRect(0, 0, ctx.width, ctx.height);
-        // Finder patterns
-        ctx.fillStyle = "black";
-        ctx.strokeStyle = "black";
-        ctx.lineWidth = QRCode.pxPerModule;
-        const q = QRCode.quiet;
-        const offset = 10 + (QRCode.version * 4);
-        this.drawFinderPattern(ctx, q, q);
-        this.drawFinderPattern(ctx, q + offset, q);
-        this.drawFinderPattern(ctx, q, q + offset);
-        // Clock rows
-        this.drawClockRows(ctx);
-        this.drawCharacters(ctx);
-
-        // TODO: Finish this
     }
 }
 
