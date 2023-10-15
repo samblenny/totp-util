@@ -164,25 +164,96 @@ class PxMatrix {
             floorplan: floorplan,
         };
     })();
+    static mask0 = [
+         0x001400, 0x000a00, 0x001400, 0x000a00, 0x001400, 0x000a00,
+         0x000000, 0x000a00, 0x001400, 0x0aaaaa, 0x155515, 0x0aaaaa,
+         0x155515, 0x0aaa00, 0x155400, 0x0aaa00, 0x155400, 0x0aaa00,
+         0x155400, 0x0aaa00, 0x155400, ];
+    static mask1 = [
+         0x001e00, 0x000000, 0x001e00, 0x000000, 0x001e00, 0x000000,
+         0x000000, 0x000000, 0x001e00, 0x000000, 0x1fffbf, 0x000000,
+         0x1fffbf, 0x000000, 0x1ffe00, 0x000000, 0x1ffe00, 0x000000,
+         0x1ffe00, 0x000000, 0x1ffe00, ];
+    static mask2 = [
+         0x001200, 0x001200, 0x001200, 0x001200, 0x001200, 0x001200,
+         0x000000, 0x001200, 0x001200, 0x049209, 0x049209, 0x049209,
+         0x049209, 0x049200, 0x049200, 0x049200, 0x049200, 0x049200,
+         0x049200, 0x049200, 0x049200, ];
+    static mask3 = [
+         0x001200, 0x000800, 0x000400, 0x001200, 0x000800, 0x000400,
+         0x000000, 0x000800, 0x000400, 0x049209, 0x124924, 0x092492,
+         0x049209, 0x124800, 0x092400, 0x049200, 0x124800, 0x092400,
+         0x049200, 0x124800, 0x092400, ];
+    static mask4 = [
+         0x001000, 0x001000, 0x000e00, 0x000e00, 0x001000, 0x001000,
+         0x000000, 0x000e00, 0x001000, 0x1c7187, 0x038e38, 0x038e38,
+         0x1c7187, 0x1c7000, 0x038e00, 0x038e00, 0x1c7000, 0x1c7000,
+         0x038e00, 0x038e00, 0x1c7000, ];
+    static mask5 = [
+         0x001e00, 0x001000, 0x001200, 0x001400, 0x001200, 0x001000,
+         0x000000, 0x001000, 0x001200, 0x155515, 0x049209, 0x041001,
+         0x1fffbf, 0x041000, 0x049200, 0x155400, 0x049200, 0x041000,
+         0x1ffe00, 0x041000, 0x049200, ];
+    static mask6 = [
+         0x001e00, 0x001000, 0x001600, 0x001400, 0x001a00, 0x001c00,
+         0x000000, 0x001000, 0x001600, 0x155515, 0x16db2d, 0x071c31,
+         0x1fffbf, 0x1c7000, 0x0db600, 0x155400, 0x16da00, 0x071c00,
+         0x1ffe00, 0x1c7000, 0x0db600, ];
+    static mask7 = [
+         0x001400, 0x000e00, 0x001c00, 0x000a00, 0x001000, 0x000200,
+         0x000000, 0x000e00, 0x001c00, 0x0aaaaa, 0x1c7187, 0x18e38e,
+         0x155515, 0x038e00, 0x071c00, 0x0aaa00, 0x1c7000, 0x18e200,
+         0x155400, 0x038e00, 0x071c00, ];
 
     constructor() {
         // Since Version 1 codes are only 21 modules wide, we can store each
-        // row of modules as a Uint32
-        this.buf = new Uint32Array(PxMatrix.height).fill(0);
+        // row of modules as a Uint32. Since there are 8 mask patterns that
+        // need to be considered, each row gets 8 Uint32's, one for each mask
+        // pattern.
+        const masksPerRow = 8;
+        this.buf = new Uint32Array(PxMatrix.height * masksPerRow);
+        for (let y=0; y<PxMatrix.height; y++) {
+            // Initialize the buffer rows with copies of the mask patterns
+            let y0 = y * masksPerRow;
+            this.buf[y0+0] = PxMatrix.mask0[y];
+            this.buf[y0+1] = PxMatrix.mask1[y];
+            this.buf[y0+2] = PxMatrix.mask2[y];
+            this.buf[y0+3] = PxMatrix.mask3[y];
+            this.buf[y0+4] = PxMatrix.mask4[y];
+            this.buf[y0+5] = PxMatrix.mask5[y];
+            this.buf[y0+6] = PxMatrix.mask6[y];
+            this.buf[y0+7] = PxMatrix.mask7[y];
+        }
     }
 
+    // Set this pixel for all 8 mask patterns simultaneously
     setPx(x, y) {
         if (x < 0 || PxMatrix.width <= x || y < 0 || PxMatrix.height <= y) {
             throw new Error(`(${x}, ${y}) out of range`);
         }
-        this.buf[y] |= 1 << x;
+        const masksPerRow = 8;
+        const y0 = y * masksPerRow;
+        const bit = 1 << x;
+        this.buf[y0+0] ^= bit;
+        this.buf[y0+1] ^= bit;
+        this.buf[y0+2] ^= bit;
+        this.buf[y0+3] ^= bit;
+        this.buf[y0+4] ^= bit;
+        this.buf[y0+5] ^= bit;
+        this.buf[y0+6] ^= bit;
+        this.buf[y0+7] ^= bit;
     }
 
-    getPx(x, y) {
+    // Get the requested pixel for the requested mask pattern
+    getPx(x, y, mask) {
         if (x < 0 || PxMatrix.width <= x || y < 0 || PxMatrix.height <= y) {
             throw new Error(`(${x}, ${y}) out of range`);
         }
-        return (this.buf[y] >> x) & 1;
+        if (mask < 0 || mask > 7) {
+            throw new Error(`mask=${mask} is out of range`);
+        }
+        const masksPerRow = 8;
+        return (this.buf[(y*masksPerRow)+mask] >> x) & 1;
     }
 
     /*
@@ -409,12 +480,13 @@ class QRCode {
     }
 
     drawCharacters(ctx) {
+        const mask = 7;
         const p = QRCode.pxPerModule;
         let x0 = QRCode.quiet * p;
         let y0 = QRCode.quiet * p;
         for (let x=0; x<PxMatrix.width; x++) {
             for (let y=0; y<PxMatrix.height; y++) {
-                let bit = this.pxMatrix.getPx(x, y);
+                let bit = this.pxMatrix.getPx(x, y, mask);
                 if (bit != 0) {
                     ctx.fillRect(x0+(x*p), y0+(y*p), p, p);
                 }
