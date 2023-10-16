@@ -1,6 +1,6 @@
 # totp-util
 
-TOTP hardware token setup utility
+TOTP hardware token setup utility for use with USB 2d barcode scanner
 
 
 ## Usage
