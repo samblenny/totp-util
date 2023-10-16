@@ -27,6 +27,7 @@ Intended Use:
    `set_clock_qr_code.png` which contains the text of `set_clock.py`. Make the
    script executable with `chmod +x set_clock.py`. This is the QR code with the
    text of the script:
+   
    ![Image of QR code containing text of set_clock.py](set_clock_qr_code.png)
 
 7. Check the current system time with `date`
