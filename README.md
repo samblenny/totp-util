@@ -17,6 +17,24 @@ codes until you tell it to stop.
 enrollment QR codes or URI's on your own (password manager, encrypted disk
 volume, printouts, or whatever... totally up to you).
 
+The interactive menu looks like this:
+
+```
+$ make run
+totp-util v0.4.1
+ ?             - Show menu
+ p             - Print profile
+ otpauth://... - Parse TOTP QR Code URI into profile
+ secret=<s>    - Set secret to <s> (must be base32 string)
+ algorithm=<s> - Set algorithm to <s> (can be empty, "SHA1" or "SHA256")
+ digits=<s>    - Set digits to <s> (can be empty, "6", or "8")
+ period=<s>    - Set period to <s> (can be empty, "30", or "60")
+ clr           - Clear profile
+ t             - Show updating TOTP code (press Enter key to stop)
+ q             - Quit
+> 
+```
+
 Also, check out the build targets in [Makefile](Makefile)
 
 
