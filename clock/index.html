@@ -427,7 +427,6 @@ class PxMatrix {
                 lowIndex = i;
             }
         }
-        debug(`lowIndex=${lowIndex} lowPenalty=${lowPenalty}`);
         return lowIndex;
     }
 
@@ -516,7 +515,6 @@ class PxMatrix {
 
     // Place format bits (see ISO/IEC 18004:2015 §7.9 "Format information")
     placeFormatBits(format) {
-        debug("format", format);
         // First copy of format bits wraps around the top left finder pattern
         let ax = [8, 8, 8, 8, 8, 8, 8, 8, 7, 5, 4, 3, 2, 1, 0];
         let ay = [0, 1, 2, 3, 4, 5, 7, 8, 8, 8, 8, 8, 8, 8, 8];
@@ -534,6 +532,7 @@ class PxMatrix {
     }
 }
 
+// Provide a logging mechanism that can be disabled after the first clock tick
 function debug(...variadicArgs) {
     if (!QRCode.oneshotArmed) {
         return;
@@ -587,7 +586,6 @@ class QRCode {
         // equivalent decimal integers. Note that "0" is 0x30 and "9" is 0x39.
         const characters = Array.from(data);
         const digits = characters.map((c) => c.charCodeAt(0) & 0xf);
-        debug("digits:", digits);
         // Pack data bitstream. Segments begin with most significant bit
         // 1. Numeric mode indicator (0b0001, 4 bits, MSB first)
         let stream = new Array();
@@ -617,7 +615,7 @@ class QRCode {
         // 4. Pack Terminator sequence (0b0000, 4 bits, or abbreviate to fit)
         {
             const untermLen = stream.length;
-            const availableBits = QRCode.maxDataBits - untermLen;
+            const availableBits = QRCode.dataBits - untermLen;
             if(availableBits > 0) {
                 if (availableBits < 4) {
                     QRCode.appendAsBits(stream, 0b0000, availableBits);
@@ -634,7 +632,6 @@ class QRCode {
             if(extraBits > 0) {
                 QRCode.appendAsBits(stream, 0, 8-extraBits);
             }
-            debug("paddedBits:", stream);
         }
         // 6. Convert bit stream to codewords
         let codewords = new Array();
@@ -647,8 +644,6 @@ class QRCode {
                 let n = bits.reduce((acc, curr) => (acc*2) + curr, initialVal);
                 codewords.push(n);
             }
-            debug("unpaddedCWLen:", unpaddedCWLen);
-            debug("codewords:", codewords);
         }
         // 7. Add alternating Pad codewords to reach the full data codeword
         //    capacity of this symbol version
@@ -664,14 +659,12 @@ class QRCode {
             if((padCWNeeded & 1) == 1) {            // Remainder %2 padding
                 codewords.push(alternatingPad1);
             }
-            debug("padded codewords:", codewords);
         }
         // 8. Generate Error Correction (ECC) codewords
         let eccCodewords = new Array();
         {
             let rs = new ReedSolomon();
             eccCodewords = rs.eccRemainder(codewords);
-            debug("eccCodewords:", eccCodewords);
         }
         // 9. Place the character symbols for the codewords as unmasked pixels
         this.pxMatrix = new PxMatrix();
@@ -707,11 +700,9 @@ class QRCode {
             this.pxMatrix.placeFormatBits(acc);
         }
 
-        // TODO: remove the oneshot bypass mechanism. It exists to prevent huge
-        // console.log debug spew as I work on implementing the QR code spec.
+        // Interlock disable debug logging after the first update
         if(QRCode.oneshotArmed) {
             QRCode.oneshotArmed = false;
-            console.log("oneshot logger enable is now off");
         }
     }
 
