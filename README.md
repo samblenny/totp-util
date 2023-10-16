@@ -5,15 +5,15 @@ TOTP setup utility for use with USB 2d barcode scanner
 
 ## Usage
 
-To run `totp_util`, do `make run`. You will need a Go compiler.
+To run `totp-util`, do `make run`. You will need a Go compiler.
 
-At the `totp_util` interactive prompt, you can enter TOTP URI's with a 2d
+At the `totp-util` interactive prompt, you can enter TOTP URI's with a 2d
 barcode scanner, type commands by hand, or copy and paste URI's from a password
-manager. Once a URI is successfully parsed, `totp_util` will begin showing OTP
+manager. Once a URI is successfully parsed, `totp-util` will begin showing OTP
 codes until you tell it to stop.
 
-`totp_util` does not save secrets or other information to disk. From
-`totp_util`'s perspective, you are responsible for managing backups of
+`totp-util` does not save secrets or other information to disk. From
+`totp-util`'s perspective, you are responsible for managing backups of
 enrollment QR codes or URI's on your own (password manager, encrypted disk
 volume, printouts, or whatever... totally up to you).
 
@@ -22,7 +22,7 @@ Also, check out the build targets in [Makefile](Makefile)
 
 ## Design
 
-The main design principle for `totp_util` was to keep the implementation as
+The main design principle for `totp-util` was to keep the implementation as
 simple and straightforward as possible. The point is to have fewer moving parts
 to break and to have readable code that is reasonable to audit with a realistic
 amount of effort.
