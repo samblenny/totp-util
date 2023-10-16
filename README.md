@@ -5,7 +5,7 @@ TOTP setup utility for use with USB 2d barcode scanner
 
 ## Usage
 
-To run `totp_util`, do `make run`
+To run `totp_util`, do `make run`. You will need a Go compiler.
 
 At the `totp_util` interactive prompt, you can enter TOTP URI's with a 2d
 barcode scanner, type commands by hand, or copy and paste URI's from a password
