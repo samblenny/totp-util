@@ -20,6 +20,14 @@ volume, printouts, or whatever... totally up to you).
 Also, check out the build targets in [Makefile](Makefile)
 
 
+## Design
+
+The main design principle for `totp_util` was to keep the implementation as
+simple and straightforward as possible. The point is to have fewer moving parts
+to break and to have readable code that is reasonable to audit with a realistic
+amount of effort.
+
+
 ## Tests
 
 To run the tests, do `make test` or `go test`.
