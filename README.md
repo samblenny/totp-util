@@ -32,6 +32,16 @@ totp-util v0.4.1
  clr           - Clear profile
  t             - Show updating TOTP code (press Enter key to stop)
  q             - Quit
+> otpauth://totp/Example:alice@google.com?secret=JBSWY3DPEHPK3PXP&issuer=Example
+{
+ "issuer": "Example",
+ "account": "alice@google.com",
+ "secret": "JBSWY3DPEHPK3PXP"
+}
+To stop displaying TOTP codes, use the Enter key.
+
+(28s)  302134  
+
 > 
 ```
 
