@@ -1,13 +1,23 @@
 # totp-util
 
-TOTP hardware token setup utility for use with USB 2d barcode scanner
+TOTP setup utility for use with USB 2d barcode scanner
 
 
 ## Usage
 
 To run `totp_util`, do `make run`
 
-For more detail, check out the build targets in [Makefile](Makefile)
+At the `totp_util` interactive prompt, you can enter TOTP URI's with a 2d
+barcode scanner, type commands by hand, or copy and paste URI's from a password
+manager. Once a URI is successfully parsed, `totp_util` will begin showing OTP
+codes until you tell it to stop.
+
+`totp_util` does not save secrets or other information to disk. From
+`totp_util`'s perspective, you are responsible for managing backups of
+enrollment QR codes or URI's on your own (password manager, encrypted disk
+volume, printouts, or whatever... totally up to you).
+
+Also, check out the build targets in [Makefile](Makefile)
 
 
 ## Tests
