@@ -393,10 +393,17 @@ class PxMatrix {
             }
         }
         const totalPx = PxMatrix.width * PxMatrix.height;
-        const darkPercent = 100 * (darkTotal / totalPx);
-        const diffFifty = Math.abs(50 - darkPercent);
-        const fivePercentIncrements = Math.floor(diffFifty / 5);
-        const penalty = fivePercentIncrements * 10;
+        const percent = 100 * (darkTotal / totalPx);
+        let penalty = 0;
+        if      ((percent <=  5) || (percent >= 95))  { penalty = 90; }
+        else if ((percent <= 10) || (percent >= 90))  { penalty = 80; }
+        else if ((percent <= 15) || (percent >= 85))  { penalty = 70; }
+        else if ((percent <= 20) || (percent >= 80))  { penalty = 60; }
+        else if ((percent <= 25) || (percent >= 75))  { penalty = 50; }
+        else if ((percent <= 30) || (percent >= 70))  { penalty = 40; }
+        else if ((percent <= 45) || (percent >= 65))  { penalty = 30; }
+        else if ((percent <= 40) || (percent >= 60))  { penalty = 20; }
+        else if ((percent <= 45) || (percent >= 55))  { penalty = 10; }
         return penalty;
     }
 
