@@ -513,6 +513,25 @@ class PxMatrix {
         // Pick the mask with the lowest penalty
         this.bestMask = this.calculatePenalties();
     }
+
+    // Place format bits (see ISO/IEC 18004:2015 §7.9 "Format information")
+    placeFormatBits(format) {
+        debug("format", format);
+        // First copy of format bits wraps around the top left finder pattern
+        let ax = [8, 8, 8, 8, 8, 8, 8, 8, 7, 5, 4, 3, 2, 1, 0];
+        let ay = [0, 1, 2, 3, 4, 5, 7, 8, 8, 8, 8, 8, 8, 8, 8];
+        // Second copy is split next to the other two finder patterns
+        let bx = [20, 19, 18, 17, 16, 15, 14, 13,  8,  8,  8,  8,  8,  8,  8];
+        let by = [ 8,  8,  8,  8,  8,  8,  8,  8, 14, 15, 16, 17, 18, 19, 20];
+        for (let i=0; i<ax.length; i++) {
+            if ((format >> i)&1 == 1) {
+                this.setPx(ax[i], ay[i]);
+                this.setPx(bx[i], by[i]);
+            }
+        }
+        // Set the dark pixel next to the bottom-left finder pattern
+        this.setPx(8, 13);
+    }
 }
 
 function debug(...variadicArgs) {
@@ -657,9 +676,36 @@ class QRCode {
         // 9. Place the character symbols for the codewords as unmasked pixels
         this.pxMatrix = new PxMatrix();
         {
+            // Mask selection happens inside of placeCharacters()
             this.pxMatrix.placeCharacters(codewords.concat(eccCodewords));
         }
-        // TODO: finish this
+        // 10. Generate 15-bit format information sequence
+        {
+            // ISO/IEC 18004:2015 §7.9 "Format information" lists the error
+            // correction level indicators as: L=0b01, M=0b00, Q=0b11, H=0b10.
+            const ecLevelBits = 0b00;
+            const maskBits = this.pxMatrix.bestMask;
+            // Calculate BCH code for generator polynomial
+            //   G(x) = x^10 + x^8 + x^5 + x^4 + x^2 + x + 1
+            // which has coefficients 0b10100110111
+            const bchGeneratorPoly = 0b10100110111;
+            const formatBits = 5;
+            const remainderBits = 10;
+            const format = ((ecLevelBits << 3) | maskBits) << remainderBits;
+            const fullShift = formatBits + remainderBits - 1;
+            let acc = format;
+            // Calculate remainder bits
+            for (let i=0; i<formatBits; i++) {
+                const leadingBit = (acc >> (fullShift-i)) & 1;
+                acc ^= leadingBit * (bchGeneratorPoly << (formatBits-i-1));
+            }
+            // OR the format bits back into the accumulator with the remainder
+            acc |= format;
+            // XOR with the mask (see ISO/IEC 18004:2015 Annex C, §C.2)
+            acc ^= 0b101010000010010;
+            // Draw it
+            this.pxMatrix.placeFormatBits(acc);
+        }
 
         // TODO: remove the oneshot bypass mechanism. It exists to prevent huge
         // console.log debug spew as I work on implementing the QR code spec.
