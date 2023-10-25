@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash"
 	"net/url" // for QueryUnescape()
+	"strings"
 	"time"
 )
 
@@ -102,6 +103,8 @@ func NewTotp(secret, digits, algorithm, period string) (*Totp, error) {
 		for i := 0; i < padLen; i++ {
 			unescapedSecret += "="
 		}
+		// Base32 decoder wants uppercase, but some TOTP QR Codes use lowercase
+		unescapedSecret := strings.ToUpper(unescapedSecret)
 		// Now decode the padded base32
 		t.Secret, err = base32.StdEncoding.DecodeString(unescapedSecret)
 		if err != nil {

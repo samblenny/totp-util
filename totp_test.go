@@ -178,6 +178,15 @@ func Test_supported_periods(t *testing.T) {
 	}
 }
 
+// Lowercase secret should work
+func Test_lowercase_secret(t *testing.T) {
+	secret := "jbswy3dpehpk3pxp"
+	_, err := NewTotp(secret, "", "", "")
+	if err != nil {
+		t.Error("\ntried:", secret, "\ngot:", err.Error())
+	}
+}
+
 // Attempting to use non-multiple-of-8-length secret values should work, as
 // long as the values are valid base32. Note that you can't just make an
 // arbitrary length string from base32 symbols and expect the result will parse
@@ -201,7 +210,7 @@ func Test_weird_but_valid_secrets(t *testing.T) {
 	// Is this a bug in Go's decoder? These have some dangling bits on the end
 	// but the decoder doesn't seem to mind?
 	badlyEncodedButStillPassing := []string{
-		"AB", "AC", "AD" }
+		"AB", "AC", "AD"}
 	for _, secret := range badlyEncodedButStillPassing {
 		_, err := NewTotp(secret, "", "", "")
 		if err != nil {
@@ -210,7 +219,7 @@ func Test_weird_but_valid_secrets(t *testing.T) {
 	}
 	// The decoder does not like odd numbers of base32 symbols
 	badlyEncodedFailing := []string{
-		"ABA", "ACA", "ADA" }
+		"ABA", "ACA", "ADA"}
 	for _, secret := range badlyEncodedFailing {
 		totp, err := NewTotp(secret, "", "", "")
 		if err == nil {
